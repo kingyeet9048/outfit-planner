@@ -1,5 +1,5 @@
 import { el, sheet } from '../ui.js';
-import { urlFor } from '../image.js';
+import { urlFor, hasBytes } from '../image.js';
 import { items as itemsStore, outfits as outfitsStore } from '../store.js';
 
 const CATEGORY_LABELS = { top: 'Top', pant: 'Pant', shoes: 'Shoes', accessory: 'Accessory', other: 'Other' };
@@ -45,7 +45,7 @@ export async function pickItem({ category, currentId = null, allowClear = true, 
             onClick: () => close(it.id)
           }, [
             el('div', { class: 'thumb-wrap' }, [
-              it.imageBlob ? el('img', { src: urlFor(ownerKey, it.imageBlob), alt: '', loading: 'lazy' }) : el('span', null, CATEGORY_ICONS[it.category]),
+              hasBytes(it.imageBlob) ? el('img', { src: urlFor(ownerKey, it.imageBlob), alt: '', loading: 'lazy' }) : el('span', null, CATEGORY_ICONS[it.category]),
               el('span', { class: `ownership-badge ${it.owned ? 'owned' : 'tobuy'}`, title: it.owned ? 'Owned' : 'To buy' }, it.owned ? '✓' : '$')
             ]),
             el('div', { class: 'item-name' }, it.name || '(unnamed)'),

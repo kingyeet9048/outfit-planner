@@ -2,7 +2,7 @@ import { el, renderTopbar, toast, confirm, sheet } from '../ui.js';
 import { items as itemsStore, outfits as outfitsStore, trips as tripsStore, dayPlans, formatDateRange, formatDayLabel, daysBetween, tripShoppingList } from '../store.js';
 import { renderStack, outfitRollup } from '../components/outfit-stack.js';
 import { pickOutfit } from '../components/picker.js';
-import { urlFor, releaseOwner } from '../image.js';
+import { urlFor, releaseOwner, hasBytes } from '../image.js';
 
 export async function view({ id }) {
   const OWNER = 'trip-detail';
@@ -65,7 +65,7 @@ export async function view({ id }) {
     const body = el('div', { class: 'shopping-body' });
     shopping.forEach(it => {
       body.appendChild(el('div', { class: 'shopping-item' }, [
-        el('div', { class: 'thumb' }, it.imageBlob ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: '' }) : el('span', null, '👕')),
+        el('div', { class: 'thumb' }, hasBytes(it.imageBlob) ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: '' }) : el('span', null, '👕')),
         el('div', { class: 'si-body' }, [
           el('div', { class: 'si-name' }, it.name || '(unnamed)'),
           el('div', { class: 'si-cat' }, [

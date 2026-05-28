@@ -53,11 +53,17 @@ function loadViaImg(file) {
   });
 }
 
+// True when a blob exists AND has non-zero bytes. Defensive guard for renderers:
+// avoids showing a broken-image icon if a Blob ever ends up empty.
+export function hasBytes(blob) {
+  return !!(blob && blob.size > 0);
+}
+
 // ---- Object URL cache (per owner key) ----
 const cache = new Map(); // ownerKey -> Map(blob -> url)
 
 export function urlFor(ownerKey, blob) {
-  if (!blob) return '';
+  if (!hasBytes(blob)) return '';
   let bucket = cache.get(ownerKey);
   if (!bucket) { bucket = new Map(); cache.set(ownerKey, bucket); }
   if (bucket.has(blob)) return bucket.get(blob);

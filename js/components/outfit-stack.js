@@ -1,5 +1,5 @@
 import { el } from '../ui.js';
-import { urlFor } from '../image.js';
+import { urlFor, hasBytes } from '../image.js';
 
 const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨', other: '🎒' };
 
@@ -13,7 +13,7 @@ function ownershipBadge(item, size = 'sm') {
 }
 
 function thumbInner(item, ownerKey) {
-  if (item && item.imageBlob) {
+  if (item && hasBytes(item.imageBlob)) {
     return el('img', { src: urlFor(ownerKey, item.imageBlob), alt: '', loading: 'lazy' });
   }
   return el('span', { 'aria-hidden': 'true' }, CATEGORY_ICONS[item ? item.category : 'top'] || '👕');

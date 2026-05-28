@@ -1,6 +1,6 @@
 import { el, renderTopbar, iconLink } from '../ui.js';
 import { items as itemsStore } from '../store.js';
-import { urlFor, releaseOwner } from '../image.js';
+import { urlFor, releaseOwner, hasBytes } from '../image.js';
 
 const CATEGORIES = [
   { value: 'all', label: 'All' },
@@ -77,7 +77,7 @@ export async function view() {
       href: `#/item/${it.id}`
     }, [
       el('div', { class: 'thumb-wrap' }, [
-        it.imageBlob ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: it.name, loading: 'lazy' }) : el('span', null, CATEGORY_ICONS[it.category] || '👕'),
+        hasBytes(it.imageBlob) ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: it.name, loading: 'lazy' }) : el('span', null, CATEGORY_ICONS[it.category] || '👕'),
         el('span', {
           class: `ownership-badge ${it.owned ? 'owned' : 'tobuy'}`,
           'aria-label': it.owned ? 'Owned' : 'To buy',

@@ -24,6 +24,25 @@ export const items = {
     const db = await getDb();
     const id = input.id || uuid();
     const existing = input.id ? await db.get('items', input.id) : null;
+
+    // imageBlob handling.
+    // WebKit (iOS Safari/Brave, 17+) corrupts blobs that were retrieved from
+    // IndexedDB when those same blob objects are re-stored. Symptom: after
+    // an update that doesn't touch the photo, reads return a lazily-loaded
+    // / empty blob and the image doesn't render until the page is refreshed
+    // a few times. Workaround: when we're not given a fresh blob, materialize
+    // the existing one into an ArrayBuffer and wrap it in a new Blob — that
+    // new Blob is detached from IDB internals and survives re-storage.
+    let imageBlob;
+    if ('imageBlob' in input) {
+      imageBlob = input.imageBlob;
+    } else if (existing && existing.imageBlob && existing.imageBlob.size > 0) {
+      const buf = await existing.imageBlob.arrayBuffer();
+      imageBlob = new Blob([buf], { type: existing.imageBlob.type || 'image/jpeg' });
+    } else {
+      imageBlob = existing ? existing.imageBlob : null;
+    }
+
     const item = {
       id,
       name: input.name || '',
@@ -31,7 +50,7 @@ export const items = {
       subcategory: input.subcategory || '',
       description: input.description || '',
       purchaseUrl: input.purchaseUrl || '',
-      imageBlob: 'imageBlob' in input ? input.imageBlob : (existing ? existing.imageBlob : null),
+      imageBlob,
       // Store as 0/1 so it can be indexed (IDB indices don't support boolean)
       owned: input.owned === false || input.owned === 0 ? 0 : 1,
       createdAt: existing ? existing.createdAt : (input.createdAt || nowIso()),

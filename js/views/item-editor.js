@@ -1,6 +1,6 @@
 import { el, renderTopbar, toast, confirm } from '../ui.js';
 import { items as itemsStore } from '../store.js';
-import { resizeFile, urlFor, releaseOwner } from '../image.js';
+import { resizeFile, urlFor, releaseOwner, hasBytes } from '../image.js';
 
 const CATEGORIES = [
   { value: 'top', label: 'Top' },
@@ -58,8 +58,9 @@ export async function view({ id }) {
   const root = el('form', { class: 'item-editor', onSubmit: (e) => { e.preventDefault(); onSave(); } });
 
   // Image picker
-  const picker = el('label', { class: 'image-picker' + (state.imageBlob ? ' has-image' : '') });
-  const imgEl = el('img', { src: state.imageBlob ? urlFor(OWNER, state.imageBlob) : '', alt: '', style: state.imageBlob ? null : { display: 'none' } });
+  const hasInitialImage = hasBytes(state.imageBlob);
+  const picker = el('label', { class: 'image-picker' + (hasInitialImage ? ' has-image' : '') });
+  const imgEl = el('img', { src: hasInitialImage ? urlFor(OWNER, state.imageBlob) : '', alt: '', style: hasInitialImage ? null : { display: 'none' } });
   const placeholder = el('div', { class: 'picker-empty' }, [
     el('span', { class: 'picker-icon' }, '📷'),
     el('span', { class: 'picker-text' }, 'Add photo')
@@ -90,7 +91,7 @@ export async function view({ id }) {
       }
     }
   });
-  if (!state.imageBlob) imgEl.style.display = 'none';
+  if (!hasInitialImage) imgEl.style.display = 'none';
   else placeholder.style.display = 'none';
   picker.appendChild(imgEl);
   picker.appendChild(placeholder);

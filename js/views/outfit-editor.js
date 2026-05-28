@@ -1,6 +1,6 @@
 import { el, renderTopbar, toast, confirm } from '../ui.js';
 import { items as itemsStore, outfits as outfitsStore } from '../store.js';
-import { urlFor, releaseOwner } from '../image.js';
+import { urlFor, releaseOwner, hasBytes } from '../image.js';
 import { pickItem } from '../components/picker.js';
 
 const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨' };
@@ -104,7 +104,7 @@ export async function view({ id }) {
       } else {
         tileWrap.replaceChildren(el('div', { class: 'slot-tile' }, [
           el('div', { class: 'slot-thumb', onClick: openPicker }, [
-            cur.imageBlob ? el('img', { src: urlFor(OWNER, cur.imageBlob), alt: '' }) : el('span', null, CATEGORY_ICONS[cat]),
+            hasBytes(cur.imageBlob) ? el('img', { src: urlFor(OWNER, cur.imageBlob), alt: '' }) : el('span', null, CATEGORY_ICONS[cat]),
             el('span', { class: `ownership-badge sm ${cur.owned ? 'owned' : 'tobuy'}`, title: cur.owned ? 'Owned' : 'To buy' }, cur.owned ? '✓' : '$')
           ]),
           el('div', { class: 'slot-text', onClick: openPicker }, [
@@ -153,7 +153,7 @@ export async function view({ id }) {
         const it = itemById(aid);
         const tile = el('div', { class: 'acc-tile' }, [
           el('div', { class: 'slot-thumb', onClick: () => openPickerForReplace(idx) }, [
-            it && it.imageBlob ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: '' }) : el('span', null, fallbackIcon),
+            it && hasBytes(it.imageBlob) ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: '' }) : el('span', null, fallbackIcon),
             it ? el('span', { class: `ownership-badge sm ${it.owned ? 'owned' : 'tobuy'}` }, it.owned ? '✓' : '$') : null,
             el('button', {
               type: 'button',

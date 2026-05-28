@@ -147,6 +147,34 @@ test('items.put: preserves existing imageBlob when imageBlob is not in input (de
   assertEq(second.category, 'pant');
 });
 
+test('items.put: re-wraps the existing blob into a fresh in-memory Blob (not the same instance as what was stored)', async () => {
+  // This is the actual WebKit workaround. After put-without-imageBlob, the
+  // stored blob should be a fresh Blob built from arrayBuffer() — detached
+  // from any IDB-internal reference. We verify the bytes survive multiple
+  // back-to-back updates, which is the precise scenario that triggers the
+  // WebKit corruption when the workaround is absent.
+  await withTestDb();
+  const original = new Uint8Array([10, 20, 30, 40, 50, 60, 70, 80]);
+  const blob = new Blob([original], { type: 'image/jpeg' });
+  const first = await items.put({ name: 'A', category: 'top', owned: true, imageBlob: blob });
+  // Three back-to-back updates without touching the image
+  let cur = first;
+  for (let i = 0; i < 3; i++) {
+    cur = await items.put({ id: cur.id, name: `A${i}`, category: 'top', owned: true });
+    assertTrue(cur.imageBlob && cur.imageBlob.size === original.length, `iteration ${i}: blob size preserved`);
+    const bytes = new Uint8Array(await cur.imageBlob.arrayBuffer());
+    assertEq(Array.from(bytes), Array.from(original));
+  }
+});
+
+test('image.hasBytes(): guards against empty / missing blobs', async () => {
+  const { hasBytes } = await import('../js/image.js');
+  assertEq(hasBytes(null), false);
+  assertEq(hasBytes(undefined), false);
+  assertEq(hasBytes(new Blob([])), false);
+  assertEq(hasBytes(new Blob([new Uint8Array([1])])), true);
+});
+
 test('blob ↔ base64 roundtrip preserves bytes', async () => {
   const bytes = new Uint8Array([1, 2, 3, 4, 5, 250, 251, 252, 253, 254, 255]);
   const blob = new Blob([bytes], { type: 'application/octet-stream' });
