@@ -126,6 +126,9 @@ export async function importFromObject(data, { mode = 'replace' } = {}) {
       accessoryIds: Array.isArray(o.accessoryIds) ? o.accessoryIds : [],
       otherIds: Array.isArray(o.otherIds) ? o.otherIds : [],
       notes: o.notes || '',
+      aiGenerated: !!o.aiGenerated,
+      aiPrompt: o.aiPrompt || '',
+      aiRationale: o.aiRationale || '',
       createdAt: o.createdAt || nowIso,
       updatedAt: o.updatedAt || o.createdAt || nowIso
     });

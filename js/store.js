@@ -122,6 +122,10 @@ export const outfits = {
       accessoryIds: Array.isArray(input.accessoryIds) ? input.accessoryIds.slice() : [],
       otherIds: Array.isArray(input.otherIds) ? input.otherIds.slice() : [],
       notes: input.notes || '',
+      // AI-generated tracking — preserved across updates unless explicitly cleared
+      aiGenerated: 'aiGenerated' in input ? !!input.aiGenerated : !!(existing && existing.aiGenerated),
+      aiPrompt: 'aiPrompt' in input ? (input.aiPrompt || '') : (existing ? (existing.aiPrompt || '') : ''),
+      aiRationale: 'aiRationale' in input ? (input.aiRationale || '') : (existing ? (existing.aiRationale || '') : ''),
       createdAt: existing ? existing.createdAt : (input.createdAt || nowIso()),
       updatedAt: nowIso()
     };
