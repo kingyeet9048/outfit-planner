@@ -35,12 +35,14 @@ export async function view({ id }) {
   const backBtn = el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Back', onClick: tryLeave }, '◀');
   renderTopbar({ title: isNew ? 'New outfit' : 'Edit outfit', left: backBtn, right: saveBtn });
 
+  const exitHash = existing ? `#/outfit/${existing.id}` : '#/outfits';
+
   async function tryLeave() {
     if (state.dirty) {
       const ok = await confirm({ title: 'Discard changes?', message: 'You have unsaved changes.', confirmLabel: 'Discard', danger: true });
       if (!ok) return;
     }
-    history.length > 1 ? history.back() : (location.hash = '#/outfits');
+    location.hash = exitHash;
   }
 
   const root = el('form', { class: 'outfit-editor', onSubmit: (e) => { e.preventDefault(); onSave(); } });
@@ -201,7 +203,7 @@ export async function view({ id }) {
     }
     saveBtn.disabled = true;
     try {
-      await outfitsStore.put({
+      const saved = await outfitsStore.put({
         id: existing?.id,
         name: state.name.trim(),
         topId: state.topId,
@@ -213,7 +215,7 @@ export async function view({ id }) {
       });
       toast(isNew ? 'Outfit created' : 'Outfit saved', { kind: 'success' });
       state.dirty = false;
-      location.hash = '#/outfits';
+      location.hash = `#/outfit/${saved.id}`;
     } catch (err) {
       toast('Save failed: ' + err.message, { kind: 'danger' });
     } finally {
