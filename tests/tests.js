@@ -462,6 +462,12 @@ async function run() {
   statsEl.style.color = fail ? 'var(--danger)' : 'var(--success)';
 }
 
-document.getElementById('run-btn').addEventListener('click', run);
-// Auto-run on load
-window.addEventListener('load', () => setTimeout(run, 50));
+// Only wire up the runner when the local-dev gate (test.html inline script)
+// approved this environment. In production the body has been (or will be)
+// replaced with a notice and the run button no longer exists.
+if (window.__TESTS_LOCAL__) {
+  const runBtn = document.getElementById('run-btn');
+  if (runBtn) runBtn.addEventListener('click', run);
+  // Auto-run on load
+  window.addEventListener('load', () => setTimeout(run, 50));
+}

@@ -8,11 +8,21 @@
   <link rel="stylesheet" href="../css/reset.css">
   <link rel="stylesheet" href="../css/app.css">
   <script>
-    if (location.protocol === 'file:') {
+    // The test runner is for local development only. In any non-loopback
+    // environment (GitHub Pages, anywhere on the public internet), show a
+    // dev-only notice instead of the runner UI.
+    (function () {
+      var h = location.hostname;
+      var isLocal = h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0' || h === '' || h.endsWith('.local');
+      var isFile = location.protocol === 'file:';
+      window.__TESTS_LOCAL__ = isLocal && !isFile;
+      if (window.__TESTS_LOCAL__) return;
       document.addEventListener('DOMContentLoaded', function () {
-        document.body.innerHTML = '<div style="max-width:560px;margin:48px auto;padding:24px;font-family:-apple-system,system-ui,sans-serif;line-height:1.5;color:#111;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.1)"><h2>Tests must be served over HTTP</h2><p>From the project folder, run:</p><pre style="background:#f4f4f5;padding:12px;border-radius:8px;font-size:13px">python -m http.server 5173</pre><p>Then open <code>http://127.0.0.1:5173/tests/test.html</code></p></div>';
-      });
-    }
+        document.body.innerHTML = isFile
+          ? '<div style="max-width:560px;margin:48px auto;padding:24px;font-family:-apple-system,system-ui,sans-serif;line-height:1.5;color:#111;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.1)"><h2>Tests must be served over HTTP</h2><p>From the project folder, run:</p><pre style="background:#f4f4f5;padding:12px;border-radius:8px;font-size:13px">python -m http.server 5173</pre><p>Then open <code>http://127.0.0.1:5173/tests/test.html</code></p></div>'
+          : '<div style="max-width:520px;margin:48px auto;padding:24px;font-family:-apple-system,system-ui,sans-serif;line-height:1.5;color:#111;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.1)"><h2>Not available</h2><p>The test runner is only enabled in local development. To run it, clone the repo, serve the folder locally, and open <code>http://127.0.0.1:5173/tests/test.html</code>.</p><p style="margin-top:16px"><a href="../" style="color:#2563eb;font-weight:600">← Back to the app</a></p></div>';
+      }, { once: true });
+    })();
   </script>
   <style>
     body { padding: 24px; font-family: var(--font); max-width: 800px; margin: 0 auto; }
