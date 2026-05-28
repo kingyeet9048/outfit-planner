@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Outfit Planner — Tests</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../css/reset.css">
+  <link rel="stylesheet" href="../css/app.css">
+  <script>
+    if (location.protocol === 'file:') {
+      document.addEventListener('DOMContentLoaded', function () {
+        document.body.innerHTML = '<div style="max-width:560px;margin:48px auto;padding:24px;font-family:-apple-system,system-ui,sans-serif;line-height:1.5;color:#111;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.1)"><h2>Tests must be served over HTTP</h2><p>From the project folder, run:</p><pre style="background:#f4f4f5;padding:12px;border-radius:8px;font-size:13px">python -m http.server 5173</pre><p>Then open <code>http://127.0.0.1:5173/tests/test.html</code></p></div>';
+      });
+    }
+  </script>
+  <style>
+    body { padding: 24px; font-family: var(--font); max-width: 800px; margin: 0 auto; }
+    h1 { margin-bottom: 16px; }
+    .test { padding: 10px 14px; border-radius: 8px; margin: 4px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    .test.pass { background: var(--success-soft); color: var(--success); }
+    .test.fail { background: var(--danger-soft); color: var(--danger); }
+    .test.run  { background: var(--surface-2); color: var(--text-muted); }
+    .stats { margin: 12px 0; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+    .controls { margin-bottom: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    pre { white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>Outfit Planner — Tests</h1>
+  <div class="controls">
+    <button id="run-btn" class="btn btn-primary btn-sm">Run tests</button>
+    <a href="../index.html" class="btn btn-ghost btn-sm">Back to app</a>
+  </div>
+  <div class="stats" id="stats">Click "Run tests" to begin.</div>
+  <div id="results"></div>
+  <script type="module" src="./tests.js"></script>
+</body>
+</html>
