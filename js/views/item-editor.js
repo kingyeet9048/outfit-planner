@@ -30,6 +30,10 @@ export async function view({ id }) {
     purchaseUrl: existing?.purchaseUrl || '',
     owned: existing ? !!existing.owned : true,
     imageBlob: existing?.imageBlob || null,
+    // True only when the user actually replaced the photo in this session.
+    // Avoids re-writing an unchanged Blob to IndexedDB, which can corrupt the
+    // blob on WebKit (iOS Safari / Brave) in some scenarios.
+    imageBlobDirty: false,
     dirty: false
   };
 
@@ -71,6 +75,7 @@ export async function view({ id }) {
         // Replace previous URL
         releaseOwner(OWNER);
         state.imageBlob = blob;
+        state.imageBlobDirty = true;
         state.dirty = true;
         const url = urlFor(OWNER, blob);
         imgEl.src = url;
@@ -194,16 +199,19 @@ export async function view({ id }) {
     }
     saveBtn.disabled = true;
     try {
-      await itemsStore.put({
+      const payload = {
         id: existing?.id,
         name: state.name.trim(),
         category: state.category,
         subcategory: state.subcategory.trim(),
         description: state.description.trim(),
         purchaseUrl: state.purchaseUrl.trim(),
-        owned: state.owned,
-        imageBlob: state.imageBlob
-      });
+        owned: state.owned
+      };
+      // Only pass imageBlob when the user touched it. items.put() falls back to
+      // the existing record's imageBlob when the key isn't present.
+      if (state.imageBlobDirty) payload.imageBlob = state.imageBlob;
+      await itemsStore.put(payload);
       toast(isNew ? 'Item added' : 'Item saved', { kind: 'success' });
       state.dirty = false;
       location.hash = '#/items';

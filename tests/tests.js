@@ -2,6 +2,7 @@
 
 import { openDB } from '../js/vendor/idb.js';
 import { match, register } from '../js/router.js';
+import { el } from '../js/ui.js';
 import { blobToBase64, base64ToBlob, buildExport, importFromObject, SCHEMA_VERSION } from '../js/exporter.js';
 import * as db from '../js/db.js';
 import { items, outfits, trips, dayPlans, daysBetween, formatDayLabel, formatDateRange, tripShoppingList, tripStats } from '../js/store.js';
@@ -122,6 +123,28 @@ test('formatDayLabel: weekday + short month', () => {
 test('formatDateRange: across days', () => {
   const s = formatDateRange('2026-07-01', '2026-07-14');
   assertEq(s, 'Jul 1 – Jul 14, 2026');
+});
+
+test('el(): textarea `value` populates the displayed value (regression: setAttribute(value) is silently ignored on textareas)', () => {
+  const ta = el('textarea', { value: 'multi\nline\ntext' });
+  assertEq(ta.value, 'multi\nline\ntext');
+});
+
+test('el(): input `value` populates the displayed value', () => {
+  const inp = el('input', { type: 'text', value: 'hello' });
+  assertEq(inp.value, 'hello');
+});
+
+test('items.put: preserves existing imageBlob when imageBlob is not in input (defensive against WebKit IDB blob corruption on re-write)', async () => {
+  await withTestDb();
+  const blob = new Blob([new Uint8Array([1, 2, 3, 4, 5])], { type: 'image/jpeg' });
+  const first = await items.put({ name: 'X', category: 'top', owned: true, imageBlob: blob });
+  // Update without passing imageBlob — existing blob must be preserved
+  const second = await items.put({ id: first.id, name: 'Y', category: 'pant', owned: false });
+  assertTrue(second.imageBlob, 'imageBlob preserved');
+  const bytes = new Uint8Array(await second.imageBlob.arrayBuffer());
+  assertEq(Array.from(bytes), [1, 2, 3, 4, 5]);
+  assertEq(second.category, 'pant');
 });
 
 test('blob ↔ base64 roundtrip preserves bytes', async () => {

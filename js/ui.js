@@ -10,6 +10,9 @@ export function el(tag, attrs, children) {
       else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
       else if (k === 'dataset' && typeof v === 'object') Object.assign(node.dataset, v);
       else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
+      // Always set `value` via the property — textareas ignore the value attribute,
+      // and inputs need it for programmatic mutation to stick.
+      else if (k === 'value' && 'value' in node) node.value = v;
       else if (k in node && typeof v !== 'string') node[k] = v;
       else node.setAttribute(k, v === true ? '' : v);
     }
