@@ -1,5 +1,5 @@
 // Cache-first app shell SW. Bump CACHE_NAME on any shell change.
-const CACHE_NAME = 'outfit-planner-v4';
+const CACHE_NAME = 'outfit-planner-v5';
 const PRECACHE = [
   './',
   './index.html',
@@ -19,8 +19,10 @@ const PRECACHE = [
   './js/components/outfit-stack.js',
   './js/components/picker.js',
   './js/views/items.js',
+  './js/views/item-view.js',
   './js/views/item-editor.js',
   './js/views/outfits.js',
+  './js/views/outfit-view.js',
   './js/views/outfit-editor.js',
   './js/views/trips.js',
   './js/views/trip-detail.js',

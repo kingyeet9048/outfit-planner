@@ -46,12 +46,14 @@ export async function view({ id }) {
     right: saveBtn
   });
 
+  const exitHash = existing ? `#/item/${existing.id}` : '#/items';
+
   async function tryLeave() {
     if (state.dirty) {
       const ok = await confirm({ title: 'Discard changes?', message: 'You have unsaved changes.', confirmLabel: 'Discard', danger: true });
       if (!ok) return;
     }
-    history.length > 1 ? history.back() : (location.hash = '#/items');
+    location.hash = exitHash;
   }
 
   // ---- Form ----
@@ -212,10 +214,11 @@ export async function view({ id }) {
       // Only pass imageBlob when the user touched it. items.put() falls back to
       // the existing record's imageBlob when the key isn't present.
       if (state.imageBlobDirty) payload.imageBlob = state.imageBlob;
-      await itemsStore.put(payload);
+      const saved = await itemsStore.put(payload);
       toast(isNew ? 'Item added' : 'Item saved', { kind: 'success' });
       state.dirty = false;
-      location.hash = '#/items';
+      // Land on the read-only view after save — user can re-tap Edit to keep editing.
+      location.hash = `#/item/${saved.id}`;
     } catch (err) {
       toast('Save failed: ' + err.message, { kind: 'danger' });
     } finally {

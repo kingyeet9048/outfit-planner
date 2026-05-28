@@ -9,10 +9,12 @@ register('/trips', () => import('./views/trips.js').then(m => m.view({})));
 register('/trip/:id', (p) => import('./views/trip-detail.js').then(m => m.view(p)));
 register('/outfits', () => import('./views/outfits.js').then(m => m.view({})));
 register('/outfit/new', () => import('./views/outfit-editor.js').then(m => m.view({ id: 'new' })));
-register('/outfit/:id', (p) => import('./views/outfit-editor.js').then(m => m.view(p)));
+register('/outfit/:id/edit', (p) => import('./views/outfit-editor.js').then(m => m.view(p)));
+register('/outfit/:id', (p) => import('./views/outfit-view.js').then(m => m.view(p)));
 register('/items', () => import('./views/items.js').then(m => m.view({})));
 register('/item/new', () => import('./views/item-editor.js').then(m => m.view({ id: 'new' })));
-register('/item/:id', (p) => import('./views/item-editor.js').then(m => m.view(p)));
+register('/item/:id/edit', (p) => import('./views/item-editor.js').then(m => m.view(p)));
+register('/item/:id', (p) => import('./views/item-view.js').then(m => m.view(p)));
 register('/settings', () => import('./views/settings.js').then(m => m.view({})));
 
 setRouteChangeHandler(({ path }) => {
