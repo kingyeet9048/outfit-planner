@@ -44,8 +44,12 @@ export async function view({ id }) {
   ]));
 
   // Name + rollup
-  root.appendChild(el('h2', { class: 'detail-title' }, outfit.name || 'Untitled'));
+  root.appendChild(el('h2', { class: 'detail-title' }, [
+    outfit.aiGenerated ? el('span', { class: 'ai-spark inline', 'aria-hidden': 'true', title: 'AI-suggested' }, '✨ ') : null,
+    outfit.name || 'Untitled'
+  ]));
   root.appendChild(el('div', { class: 'detail-pills' }, [
+    outfit.aiGenerated ? el('span', { class: 'badge badge-accent' }, '✨ AI-suggested') : null,
     rollup.total === 0
       ? el('span', { class: 'badge' }, 'Empty')
       : rollup.toBuy === 0
@@ -53,6 +57,15 @@ export async function view({ id }) {
         : el('span', { class: 'badge badge-warn' }, `$ ${rollup.toBuy} to buy`),
     el('span', { class: 'badge' }, `${rollup.total} item${rollup.total === 1 ? '' : 's'}`)
   ]));
+
+  // AI rationale (if present)
+  if (outfit.aiGenerated && outfit.aiRationale && outfit.aiRationale.trim()) {
+    root.appendChild(el('section', { class: 'detail-section' }, [
+      el('h3', { class: 'detail-section-title' }, "Stylist's note"),
+      el('p', { class: 'detail-body' }, outfit.aiRationale),
+      outfit.aiPrompt ? el('p', { class: 'meta', style: { marginTop: '6px', fontSize: '12px', color: 'var(--text-muted)' } }, `Prompted by: "${outfit.aiPrompt}"`) : null
+    ]));
+  }
 
   // Per-slot item list — tap to drill into item detail
   const slotsBody = el('div', { class: 'list' });

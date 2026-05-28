@@ -15,6 +15,7 @@ register('/items', () => import('./views/items.js').then(m => m.view({})));
 register('/item/new', () => import('./views/item-editor.js').then(m => m.view({ id: 'new' })));
 register('/item/:id/edit', (p) => import('./views/item-editor.js').then(m => m.view(p)));
 register('/item/:id', (p) => import('./views/item-view.js').then(m => m.view(p)));
+register('/stylist', () => import('./views/stylist.js').then(m => m.view({})));
 register('/settings', () => import('./views/settings.js').then(m => m.view({})));
 
 setRouteChangeHandler(({ path }) => {

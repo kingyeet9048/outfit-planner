@@ -4,6 +4,7 @@ const TABS = [
   { href: '#/trips', label: 'Trips', icon: '🧳' },
   { href: '#/outfits', label: 'Outfits', icon: '👔' },
   { href: '#/items', label: 'Items', icon: '👕' },
+  { href: '#/stylist', label: 'Stylist', icon: '✨' },
   { href: '#/settings', label: 'Settings', icon: '⚙️' }
 ];
 
@@ -15,6 +16,7 @@ function isActive(tabHref, currentHash) {
   if (tab === '/trips' && (norm.startsWith('/trip/') || norm === '/' || norm === '/trips')) return true;
   if (tab === '/outfits' && norm.startsWith('/outfit')) return true;
   if (tab === '/items' && norm.startsWith('/item')) return true;
+  if (tab === '/stylist' && norm.startsWith('/stylist')) return true;
   if (tab === '/settings' && norm.startsWith('/settings')) return true;
   return false;
 }

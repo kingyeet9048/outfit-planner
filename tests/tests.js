@@ -3,6 +3,9 @@
 import { openDB } from '../js/vendor/idb.js';
 import { match, register } from '../js/router.js';
 import { el } from '../js/ui.js';
+import { parseIntent } from '../js/stylist/intent.js';
+import { buildItemContext, generateOutfits } from '../js/stylist/engine.js';
+import { rgbToHsv, colorTone, harmonyScore, classifyHarmony } from '../js/stylist/color.js';
 import { blobToBase64, base64ToBlob, buildExport, importFromObject, SCHEMA_VERSION } from '../js/exporter.js';
 import * as db from '../js/db.js';
 import { items, outfits, trips, dayPlans, daysBetween, formatDayLabel, formatDateRange, tripShoppingList, tripStats } from '../js/store.js';
@@ -165,6 +168,133 @@ test('items.put: re-wraps the existing blob into a fresh in-memory Blob (not the
     const bytes = new Uint8Array(await cur.imageBlob.arrayBuffer());
     assertEq(Array.from(bytes), Array.from(original));
   }
+});
+
+// ----- Stylist tests -----
+test('stylist.intent: extracts formality from prompt', () => {
+  assertEq(parseIntent('something formal for dinner').formality, 'formal');
+  assertEq(parseIntent('casual weekend look').formality, 'casual');
+  assertEq(parseIntent('smart business meeting').formality, 'smart');
+  assertEq(parseIntent('gym workout').formality, 'athletic');
+  assertEq(parseIntent('beach day').formality, 'beach');
+});
+
+test('stylist.intent: extracts weather and count', () => {
+  const i = parseIntent('3 outfits for warm summer weather');
+  assertEq(i.weather, 'hot');
+  assertEq(i.count, 3);
+});
+
+test('stylist.intent: "a week of looks" maps to count 5', () => {
+  assertEq(parseIntent('give me a week of looks').count, 5);
+});
+
+test('stylist.intent: extracts preferred colors', () => {
+  const i = parseIntent('something in navy blue and white');
+  assertTrue(i.preferredColors.includes('blue'), 'blue preferred');
+  assertTrue(i.preferredColors.includes('white'), 'white preferred');
+});
+
+test('stylist.intent: detects refinement directives', () => {
+  const i = parseIntent('swap the top for something else');
+  assertEq(i.refine.swapTop, true);
+});
+
+test('stylist.color: rgbToHsv basic conversions', () => {
+  const red = rgbToHsv({ r: 255, g: 0, b: 0 });
+  assertTrue(red.h < 5 || red.h > 355, 'red hue');
+  assertTrue(red.s > 0.9, 'red saturated');
+});
+
+test('stylist.color: tone classification', () => {
+  assertEq(colorTone({ h: 240, s: 0.8, v: 0.5 }), 'blue');
+  assertEq(colorTone({ h: 0, s: 0, v: 0.1 }), 'black');
+  assertEq(colorTone({ h: 0, s: 0, v: 0.95 }), 'white');
+  assertEq(colorTone({ h: 0, s: 0.05, v: 0.5 }), 'gray');
+});
+
+test('stylist.color: harmony rules', () => {
+  const blue = { h: 240, s: 0.7, v: 0.5 };
+  const blueShade = { h: 245, s: 0.7, v: 0.6 };
+  const orange = { h: 30, s: 0.7, v: 0.7 };
+  const yellow = { h: 60, s: 0.7, v: 0.8 };
+  // Monochromatic close hues — score perfect
+  assertTrue(harmonyScore(blue, blueShade) >= 0.95, 'mono harmonious');
+  // Complementary (~180° apart): blue 240, orange 30 → 210° diff, wraps to 150° — actually that's not complementary. Let's pick proper pair:
+  const yellow180 = { h: 60, s: 0.7, v: 0.7 };
+  const purple = { h: 240, s: 0.7, v: 0.7 };
+  assertTrue(harmonyScore(yellow180, purple) >= 0.8, 'complementary harmonious');
+});
+
+test('stylist.color: classifyHarmony', () => {
+  // All neutrals
+  assertEq(classifyHarmony([{ h: 0, s: 0.05, v: 0.5 }, { h: 0, s: 0.05, v: 0.2 }]), 'neutral palette');
+  // Single accent
+  assertEq(classifyHarmony([{ h: 0, s: 0.05, v: 0.5 }, { h: 240, s: 0.7, v: 0.5 }]), 'neutral with a single accent');
+  // Two close hues
+  assertEq(classifyHarmony([{ h: 220, s: 0.7, v: 0.5 }, { h: 240, s: 0.7, v: 0.5 }]), 'analogous');
+});
+
+test('stylist.engine: generates a full outfit from seed items', async () => {
+  await withTestDb();
+  const seed = [
+    { name: 'White tee', category: 'top', owned: true },
+    { name: 'Blue jeans', category: 'pant', owned: true },
+    { name: 'White sneakers', category: 'shoes', owned: false },
+    { name: 'Watch', category: 'accessory', subcategory: 'watch', owned: true }
+  ];
+  for (const it of seed) await items.put(it);
+  const all = await items.all();
+  const ctx = await buildItemContext(all);
+  const generated = generateOutfits(ctx, parseIntent('casual look'), { seed: 42 });
+  assertEq(generated.length, 1);
+  const o = generated[0];
+  assertTrue(o.topId, 'has top');
+  assertTrue(o.shoesId, 'has shoes');
+  assertTrue(o._meta, 'metadata attached');
+});
+
+test('stylist.engine: respects count from intent', async () => {
+  await withTestDb();
+  // Need enough items to generate multiple outfits without exhausting pool
+  for (let i = 0; i < 4; i++) {
+    await items.put({ name: `Top ${i}`, category: 'top', owned: true });
+    await items.put({ name: `Pant ${i}`, category: 'pant', owned: true });
+    await items.put({ name: `Shoe ${i}`, category: 'shoes', owned: true });
+  }
+  const ctx = await buildItemContext(await items.all());
+  const generated = generateOutfits(ctx, parseIntent('3 outfits for the weekend'), { seed: 100 });
+  assertEq(generated.length, 3);
+  // No item reused across outfits
+  const usedTops = new Set(generated.map(g => g.topId));
+  assertEq(usedTops.size, 3);
+});
+
+test('stylist.engine: returns empty when no tops exist', async () => {
+  await withTestDb();
+  await items.put({ name: 'Pant', category: 'pant', owned: true });
+  await items.put({ name: 'Shoe', category: 'shoes', owned: true });
+  const ctx = await buildItemContext(await items.all());
+  const generated = generateOutfits(ctx, parseIntent('casual'), { seed: 1 });
+  assertEq(generated.length, 0);
+});
+
+test('outfits.put: persists aiGenerated, aiPrompt, aiRationale', async () => {
+  await withTestDb();
+  const o = await outfits.put({
+    name: 'AI Look',
+    aiGenerated: true,
+    aiPrompt: 'formal dinner',
+    aiRationale: 'Clean lines, dark palette.'
+  });
+  assertEq(o.aiGenerated, true);
+  assertEq(o.aiPrompt, 'formal dinner');
+  assertEq(o.aiRationale, 'Clean lines, dark palette.');
+  // Update without specifying ai fields — they should be preserved
+  const updated = await outfits.put({ id: o.id, name: 'Renamed' });
+  assertEq(updated.aiGenerated, true);
+  assertEq(updated.aiPrompt, 'formal dinner');
+  assertEq(updated.aiRationale, 'Clean lines, dark palette.');
 });
 
 test('image.hasBytes(): guards against empty / missing blobs', async () => {

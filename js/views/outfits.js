@@ -34,7 +34,8 @@ export async function view() {
         ? el('span', { class: 'badge badge-success' }, '✓ Complete')
         : el('span', { class: 'badge badge-warn' }, `$ ${r.toBuy} to buy`);
 
-    grid.appendChild(el('a', { class: 'outfit-card', href: `#/outfit/${o.id}` }, [
+    grid.appendChild(el('a', { class: 'outfit-card' + (o.aiGenerated ? ' is-ai' : ''), href: `#/outfit/${o.id}` }, [
+      o.aiGenerated ? el('span', { class: 'ai-corner-badge', 'aria-label': 'AI-suggested', title: 'AI-suggested' }, '✨') : null,
       stack,
       el('div', { class: 'outfit-name' }, o.name || 'Untitled'),
       el('div', { class: 'outfit-rollup' }, rollupBadge)
