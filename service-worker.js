@@ -1,5 +1,5 @@
 // Cache-first app shell SW. Bump CACHE_NAME on any shell change.
-const CACHE_NAME = 'outfit-planner-v7';
+const CACHE_NAME = 'outfit-planner-v8';
 const PRECACHE = [
   './',
   './index.html',
