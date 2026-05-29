@@ -1,8 +1,18 @@
 import { el, renderTopbar, toast, confirm, sheet } from '../ui.js';
-import { items as itemsStore, outfits as outfitsStore, trips as tripsStore, dayPlans, formatDateRange, formatDayLabel, daysBetween, tripShoppingList } from '../store.js';
+import { items as itemsStore, outfits as outfitsStore, trips as tripsStore, dayPlans, formatDateRange, formatDayLabel, daysBetween, tripShoppingList, groupShoppingByRetailer } from '../store.js';
 import { renderStack, outfitRollup } from '../components/outfit-stack.js';
 import { pickOutfit } from '../components/picker.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
+
+// Deterministic, recognizable color for a store avatar (same store → same hue
+// across renders). Mid-tone lightness so white text stays legible in both themes.
+function storeColor(seed) {
+  let h = 0;
+  const s = String(seed || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  // Lower lightness keeps the white monogram legible across all hues.
+  return `hsl(${h}, 55%, 36%)`;
+}
 
 export async function view({ id }) {
   const OWNER = 'trip-detail';
@@ -57,38 +67,65 @@ export async function view({ id }) {
         ])
       ]);
     }
+    const groups = groupShoppingByRetailer(shopping);
+    // Headers add clarity only when there's something to distinguish — skip them
+    // when every item is in the single "no store link" bucket.
+    const showHeaders = !(groups.length === 1 && groups[0].key === '');
+    const storeCount = groups.filter(g => g.key !== '').length;
+
+    const summaryParts = [`${shopping.length} ${shopping.length === 1 ? 'item' : 'items'} to buy`];
+    if (showHeaders && storeCount > 1) summaryParts.push(`${storeCount} stores`);
+
     const details = el('details', { class: 'shopping-list', open: true });
     details.appendChild(el('summary', null, [
       el('span', null, '🛒'),
-      el('span', null, `Shopping list · ${shopping.length} ${shopping.length === 1 ? 'item' : 'items'} to buy`)
+      el('span', null, `Shopping list · ${summaryParts.join(' · ')}`)
     ]));
     const body = el('div', { class: 'shopping-body' });
-    shopping.forEach(it => {
-      body.appendChild(el('div', { class: 'shopping-item' }, [
-        el('div', { class: 'thumb' }, hasBytes(it.imageBlob) ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: '' }) : el('span', null, '👕')),
-        el('div', { class: 'si-body' }, [
-          el('div', { class: 'si-name' }, it.name || '(unnamed)'),
-          el('div', { class: 'si-cat' }, [
-            it.category,
-            it.subcategory ? ` · ${it.subcategory}` : ''
-          ].join(''))
-        ]),
-        el('div', { class: 'si-actions' }, [
-          it.purchaseUrl ? el('a', { class: 'buy-link', href: it.purchaseUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Buy →') : null,
-          el('button', {
-            type: 'button',
-            class: 'mark-owned-btn',
-            onClick: async () => {
-              await itemsStore.setOwned(it.id, true);
-              toast(`Marked "${it.name}" as owned`, { kind: 'success' });
-              renderAll();
-            }
-          }, '✓ Owned')
-        ])
-      ]));
-    });
+
+    if (showHeaders) {
+      groups.forEach(group => {
+        const groupEl = el('div', { class: 'shopping-group' }, [
+          el('div', { class: 'shopping-group-head' }, [
+            el('span', { class: 'store-avatar', 'aria-hidden': 'true', style: { background: storeColor(group.key || group.label) } }, group.label.charAt(0).toUpperCase()),
+            el('span', { class: 'store-name' }, group.label),
+            el('span', { class: 'store-count' }, String(group.items.length))
+          ]),
+          ...group.items.map(renderShoppingItem)
+        ]);
+        body.appendChild(groupEl);
+      });
+    } else {
+      groups[0].items.forEach(it => body.appendChild(renderShoppingItem(it)));
+    }
     details.appendChild(body);
     return details;
+  }
+
+  // A single shopping-list row. Shared by the grouped and flat layouts.
+  function renderShoppingItem(it) {
+    return el('div', { class: 'shopping-item' }, [
+      el('div', { class: 'thumb' }, hasBytes(it.imageBlob) ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: '' }) : el('span', null, '👕')),
+      el('div', { class: 'si-body' }, [
+        el('div', { class: 'si-name' }, it.name || '(unnamed)'),
+        el('div', { class: 'si-cat' }, [
+          it.category,
+          it.subcategory ? ` · ${it.subcategory}` : ''
+        ].join(''))
+      ]),
+      el('div', { class: 'si-actions' }, [
+        it.purchaseUrl ? el('a', { class: 'buy-link', href: it.purchaseUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Buy →') : null,
+        el('button', {
+          type: 'button',
+          class: 'mark-owned-btn',
+          onClick: async () => {
+            await itemsStore.setOwned(it.id, true);
+            toast(`Marked "${it.name}" as owned`, { kind: 'success' });
+            renderAll();
+          }
+        }, '✓ Owned')
+      ])
+    ]);
   }
 
   function renderDays(data) {

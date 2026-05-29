@@ -8,7 +8,7 @@ import { buildItemContext, generateOutfits } from '../js/stylist/engine.js';
 import { rgbToHsv, colorTone, harmonyScore, classifyHarmony } from '../js/stylist/color.js';
 import { blobToBase64, base64ToBlob, buildExport, importFromObject, SCHEMA_VERSION } from '../js/exporter.js';
 import * as db from '../js/db.js';
-import { items, outfits, trips, dayPlans, daysBetween, formatDayLabel, formatDateRange, tripShoppingList, tripStats } from '../js/store.js';
+import { items, outfits, trips, dayPlans, daysBetween, formatDayLabel, formatDateRange, tripShoppingList, tripStats, retailerFromUrl, groupShoppingByRetailer } from '../js/store.js';
 import { renderOutfitsCanvas, canvasToBlob, shareOutfits } from '../js/share.js';
 import { isStandalone, isPersisted, isStorageProtected, isIOS } from '../js/storage.js';
 import {
@@ -559,6 +559,81 @@ test('export/import: bytes preserved for image blob', async () => {
   assertTrue(restored, 'image blob restored');
   const restoredBytes = new Uint8Array(await restored.arrayBuffer());
   assertEq(Array.from(restoredBytes), Array.from(bytes));
+});
+
+// ----- Retailer grouping tests -----
+test('retailerFromUrl: amazon full URL → Amazon', () => {
+  assertEq(retailerFromUrl('https://www.amazon.com/dp/B000123'), { key: 'amazon.com', label: 'Amazon' });
+});
+test('retailerFromUrl: walmart product URL (real example) → Walmart', () => {
+  const r = retailerFromUrl('https://www.walmart.com/ip/Casio-Men-s-Watch-MTPV001GL-9B/771523612?classType=REGULAR&from=/search');
+  assertEq(r, { key: 'walmart.com', label: 'Walmart' });
+});
+test('retailerFromUrl: amzn.to shortener folds into Amazon (real example)', () => {
+  assertEq(retailerFromUrl('https://amzn.to/4uuQbfw'), { key: 'amazon.com', label: 'Amazon' });
+});
+test('retailerFromUrl: a.co short link folds into Amazon', () => {
+  assertEq(retailerFromUrl('https://a.co/d/abc123'), { key: 'amazon.com', label: 'Amazon' });
+});
+test('retailerFromUrl: empty / missing → shared No store link bucket', () => {
+  assertEq(retailerFromUrl(''), { key: '', label: 'No store link' });
+  assertEq(retailerFromUrl(null), { key: '', label: 'No store link' });
+  assertEq(retailerFromUrl('   '), { key: '', label: 'No store link' });
+});
+test('retailerFromUrl: scheme-less URL is tolerated', () => {
+  assertEq(retailerFromUrl('walmart.com/ip/123'), { key: 'walmart.com', label: 'Walmart' });
+});
+test('retailerFromUrl: unknown domain is Title-cased', () => {
+  assertEq(retailerFromUrl('https://shop.cool-threads.io/x'), { key: 'cool-threads.io', label: 'Cool Threads' });
+});
+test('retailerFromUrl: two-level TLD keeps registrable domain (amazon.co.uk)', () => {
+  assertEq(retailerFromUrl('https://www.amazon.co.uk/dp/x'), { key: 'amazon.co.uk', label: 'Amazon' });
+});
+test('retailerFromUrl: garbage string → No store link (no throw)', () => {
+  assertEq(retailerFromUrl('not a url at all'), { key: '', label: 'No store link' });
+});
+
+test('groupShoppingByRetailer: groups by store, ungrouped last, sorted', () => {
+  const list = [
+    { name: 'Watch', purchaseUrl: 'https://www.walmart.com/ip/1' },
+    { name: 'Belt', purchaseUrl: 'https://amzn.to/abc' },
+    { name: 'Socks', purchaseUrl: '' },
+    { name: 'Adapter', purchaseUrl: 'https://www.amazon.com/dp/2' },
+    { name: 'Hat', purchaseUrl: 'https://www.walmart.com/ip/3' }
+  ];
+  const groups = groupShoppingByRetailer(list);
+  assertEq(groups.map(g => g.label), ['Amazon', 'Walmart', 'No store link']);
+  // Amazon merges amzn.to + amazon.com; items sorted by name (Adapter, Belt)
+  const amazon = groups.find(g => g.label === 'Amazon');
+  assertEq(amazon.key, 'amazon.com');
+  assertEq(amazon.items.map(i => i.name), ['Adapter', 'Belt']);
+  const walmart = groups.find(g => g.label === 'Walmart');
+  assertEq(walmart.items.map(i => i.name), ['Hat', 'Watch']);
+  const none = groups.find(g => g.key === '');
+  assertEq(none.items.map(i => i.name), ['Socks']);
+});
+test('groupShoppingByRetailer: empty input → no groups', () => {
+  assertEq(groupShoppingByRetailer([]), []);
+  assertEq(groupShoppingByRetailer(null), []);
+});
+test('groupShoppingByRetailer: all unlinked → single No store link group', () => {
+  const groups = groupShoppingByRetailer([{ name: 'A', purchaseUrl: '' }, { name: 'B' }]);
+  assertEq(groups.length, 1);
+  assertEq(groups[0].key, '');
+  assertEq(groups[0].items.length, 2);
+});
+test('groupShoppingByRetailer: integration — derives groups from a real trip shopping list', async () => {
+  await withTestDb();
+  const watch = await items.put({ name: 'Watch', category: 'accessory', owned: false, purchaseUrl: 'https://www.walmart.com/ip/1' });
+  const belt = await items.put({ name: 'Belt', category: 'accessory', owned: false, purchaseUrl: 'https://amzn.to/xyz' });
+  const top = await items.put({ name: 'Shirt', category: 'top', owned: true });
+  const outfit = await outfits.put({ name: 'O', topId: top.id, accessoryIds: [watch.id, belt.id] });
+  const trip = await trips.put({ name: 'T', startDate: '2026-07-01', endDate: '2026-07-02' });
+  await dayPlans.addOutfit(trip.id, '2026-07-01', outfit.id);
+  const shopping = await tripShoppingList(trip.id);
+  const groups = groupShoppingByRetailer(shopping);
+  // owned top excluded; watch (Walmart) + belt (Amazon) grouped
+  assertEq(groups.map(g => g.label), ['Amazon', 'Walmart']);
 });
 
 // ----- Share API tests -----
