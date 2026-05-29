@@ -231,6 +231,11 @@ html, body { background: var(--bg); color: var(--text); font-family: var(--font)
 .list-row .row-chevron { color: var(--text-muted); font-size: 18px; flex-shrink: 0; }
 .list-row .row-badges { display: flex; gap: 6px; flex-wrap: wrap; }
 
+/* Share-picker rows: checkbox-as-row, full row is the label */
+.share-pick-row { cursor: pointer; }
+.share-pick-row .share-pick-cb { width: 22px; height: 22px; accent-color: var(--accent); flex-shrink: 0; cursor: pointer; }
+.share-pick-row:has(.share-pick-cb:checked) { border-color: var(--accent); background: var(--accent-soft); }
+
 /* Badges */
 .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--surface-2); color: var(--text-muted); }
 .badge.badge-warn { background: var(--warn-soft); color: var(--warn); }

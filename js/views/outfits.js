@@ -1,16 +1,23 @@
-import { el, renderTopbar, iconLink } from '../ui.js';
+import { el, renderTopbar, iconLink, iconButton, sheet, toast } from '../ui.js';
 import { items as itemsStore, outfits as outfitsStore } from '../store.js';
 import { renderStack, outfitRollup } from '../components/outfit-stack.js';
 import { releaseOwner } from '../image.js';
+import { shareOutfits } from '../share.js';
 
 export async function view() {
   const OWNER = 'outfits-list';
   releaseOwner(OWNER);
 
-  renderTopbar({ title: 'Outfits', right: iconLink('#/outfit/new', 'New outfit', '+') });
-
   const [list, allItems] = await Promise.all([outfitsStore.all(), itemsStore.all()]);
   const itemsById = new Map(allItems.map(i => [i.id, i]));
+  list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  const topbarRight = el('div', { style: { display: 'flex', alignItems: 'center', gap: '4px' } }, [
+    list.length ? iconButton('Share outfits', '📤', () => openShareSheet(list, itemsById)) : null,
+    iconLink('#/outfit/new', 'New outfit', '+')
+  ]);
+  renderTopbar({ title: 'Outfits', right: topbarRight });
+
   const root = el('div', { class: 'outfits-view' });
 
   if (!list.length) {
@@ -24,7 +31,6 @@ export async function view() {
   }
 
   const grid = el('div', { class: 'outfit-grid' });
-  list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   list.forEach(o => {
     const stack = renderStack({ outfit: o, itemsById, size: 'md', ownerKey: OWNER });
     const r = outfitRollup({ outfit: o, itemsById });
@@ -43,4 +49,70 @@ export async function view() {
   });
   root.appendChild(grid);
   return { node: root, cleanup: () => releaseOwner(OWNER) };
+}
+
+function openShareSheet(outfits, itemsById) {
+  const selected = new Set();
+  let countEl, shareBtn;
+
+  const updateCount = () => {
+    countEl.textContent = selected.size
+      ? `${selected.size} selected`
+      : 'Pick outfits to share';
+    shareBtn.disabled = selected.size === 0;
+    shareBtn.style.opacity = selected.size === 0 ? '0.5' : '1';
+  };
+
+  sheet({
+    title: 'Share outfits',
+    body: (close) => {
+      countEl = el('p', { class: 'meta', style: { marginBottom: '12px' } }, 'Pick outfits to share');
+      const list = el('div', { class: 'list share-pick-list' });
+      outfits.forEach(o => {
+        const r = outfitRollup({ outfit: o, itemsById });
+        const row = el('label', { class: 'list-row share-pick-row' }, [
+          el('input', {
+            type: 'checkbox',
+            class: 'share-pick-cb',
+            onChange: (e) => {
+              if (e.target.checked) selected.add(o.id);
+              else selected.delete(o.id);
+              updateCount();
+            }
+          }),
+          el('div', { class: 'thumb' }, '👔'),
+          el('div', { class: 'row-body' }, [
+            el('div', { class: 'row-title' }, o.name || 'Untitled'),
+            el('div', { class: 'row-sub' }, `${r.total} item${r.total === 1 ? '' : 's'}${r.toBuy ? ` · ${r.toBuy} to buy` : ''}`)
+          ])
+        ]);
+        list.appendChild(row);
+      });
+
+      shareBtn = el('button', {
+        type: 'button',
+        class: 'btn btn-primary btn-block',
+        disabled: true,
+        style: { marginTop: '16px', opacity: '0.5' },
+        onClick: async () => {
+          if (!selected.size) return;
+          const picked = outfits.filter(o => selected.has(o.id));
+          close();
+          try {
+            const result = await shareOutfits(picked, itemsById);
+            if (result.method === 'download') {
+              toast(picked.length === 1 ? 'Outfit image downloaded' : 'Outfits image downloaded');
+            }
+          } catch (err) {
+            toast('Share failed: ' + err.message, { kind: 'danger' });
+          }
+        }
+      }, 'Share');
+
+      const wrap = el('div', null, [countEl, list, shareBtn]);
+      // Initialise label after children attached so refs are valid
+      updateCount();
+      return wrap;
+    }
+  });
 }

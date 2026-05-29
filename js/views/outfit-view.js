@@ -2,6 +2,7 @@ import { el, renderTopbar, iconButton, toast, confirm, sheet } from '../ui.js';
 import { items as itemsStore, outfits as outfitsStore } from '../store.js';
 import { renderStack, outfitRollup } from '../components/outfit-stack.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
+import { shareOutfits } from '../share.js';
 
 const CATEGORY_LABELS = { top: 'Top', pant: 'Pant', shoes: 'Shoes', accessory: 'Accessory', other: 'Other' };
 const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨', other: '🎒' };
@@ -130,6 +131,25 @@ export async function view({ id }) {
         }, [
           el('div', { class: 'thumb' }, '✏️'),
           el('div', { class: 'row-body' }, [el('div', { class: 'row-title' }, 'Edit outfit')])
+        ]),
+        el('button', {
+          type: 'button',
+          class: 'list-row',
+          onClick: async () => {
+            close();
+            try {
+              const result = await shareOutfits([outfit], itemsById);
+              if (result.method === 'download') toast('Outfit image downloaded');
+            } catch (err) {
+              toast('Share failed: ' + err.message, { kind: 'danger' });
+            }
+          }
+        }, [
+          el('div', { class: 'thumb' }, '📤'),
+          el('div', { class: 'row-body' }, [
+            el('div', { class: 'row-title' }, 'Share outfit'),
+            el('div', { class: 'row-sub' }, 'Save or send as a PNG image')
+          ])
         ]),
         el('button', {
           type: 'button',
