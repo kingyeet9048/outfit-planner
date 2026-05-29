@@ -10,6 +10,8 @@ A small offline-first web app for planning trip outfits day by day. Built as a s
 - Create **trips** with a date range, then assign an outfit to each day.
 - Per-trip **shopping list** automatically lists every item referenced anywhere in the trip that you don't own yet.
 - **Export / import** all data as a single JSON file so you can move it between devices.
+- **Eviction protection**: requests persistent storage on launch and shows a persistent, tappable warning bar until the app is added to the Home Screen (installed PWAs are exempt from WebKit's 7-day storage eviction).
+- **Automatic backup safety net**: a once-a-day prompt backs up everything with one tap to a single, always-overwritten file (no dated copies pile up). If the app ever opens blank, it offers a one-time restore with guidance on finding your backup.
 - Works offline once loaded (service worker caches the app shell).
 
 ## Local testing (before deploying)
@@ -26,7 +28,7 @@ Open `index.html` directly via `file://` will NOT work — browsers block JavaSc
 
 Either script tries `python -m http.server`, then falls back to `npx serve`. Then open <http://127.0.0.1:5173/>.
 
-To run the test suite, open <http://127.0.0.1:5173/tests/test.html> — it runs automatically and reports pass/fail counts inline. There are 23 tests covering pure logic (UUID, routing, date helpers, blob ↔ base64 roundtrip) and IndexedDB integration (CRUD, cascade deletes, shopping list, export/import).
+To run the test suite, open <http://127.0.0.1:5173/tests/test.html> — it runs automatically and reports pass/fail counts inline. There are 78 tests covering pure logic (UUID, routing, date helpers, blob ↔ base64 roundtrip, backup-reminder timing, empty-DB detection), IndexedDB integration (CRUD, cascade deletes, shopping list, export/import, restore-from-file), and UI smoke tests (storage warning bar, install guide, backup/restore prompts).
 
 ## Deploying to GitHub Pages
 
@@ -46,13 +48,23 @@ To run the test suite, open <http://127.0.0.1:5173/tests/test.html> — it runs 
 ### Installing on iPhone
 
 1. Open the URL in **Brave** (or Safari).
-2. Tap the **Share** button → **Add to Home Screen**. This lets the app launch full-screen, stay offline, and keeps IndexedDB from being evicted as aggressively.
+2. Tap the **Share** button → **Add to Home Screen**. This lets the app launch full-screen, stay offline, and — crucially — exempts it from WebKit's 7-day storage eviction. Until you do this the app shows a red warning bar at the top of every screen; tap it for step-by-step instructions.
 
 The app respects iOS safe areas, uses 16px form fields to avoid focus zoom, and shows a native file picker action sheet so you can choose between **Camera** and **Photo Library** when adding item photos.
 
 ## Data portability
 
-Because Safari/WebKit aggressively evicts IndexedDB on sites that aren't added to the home screen, **export to JSON regularly** as your real backup.
+Because Safari/WebKit aggressively evicts IndexedDB on sites that aren't added to the home screen, the app pushes you toward two safety nets: **install to the Home Screen** (stops eviction) and a **daily one-tap backup** (survives it).
+
+### Automatic backup
+
+- Once a day the app prompts **Back up your data**. One tap writes a single file named `outfit-planner-backup.json`.
+  - **iPhone / Safari / Firefox**: the file goes through the native Share sheet — save it to **Files / iCloud Drive**. Saving to the same folder each time *replaces* the previous backup, so dated copies never pile up.
+  - **Desktop Chrome / Edge / Brave**: pick the file once in **Settings → Backup → Choose backup file**; every later backup silently overwrites it.
+- If the app opens with **no data** (a fresh device, or eviction wiped it), it shows a one-time **Restore your data?** prompt. On iPhone it tells you where to look: **Files → iCloud Drive / On My iPhone → search `outfit-planner-backup`**.
+- Manage all of this in **Settings → Backup** (back up now, set/forget the destination, restore).
+
+### Manual export
 
 - **Settings → Export** downloads `outfit-planner-export-YYYY-MM-DD.json` (images are base64-embedded so it's a single file you can email / AirDrop / save to iCloud Drive).
 - **Settings → Import** restores from that file. You can choose **Replace** (wipes current data first) or **Merge** (additive, upserts by id).
@@ -77,6 +89,11 @@ Before declaring a release ready, walk through this on the device you actually u
 - [ ] **Export** → clear data → **Import** → all items/outfits/trips/days restored, images included
 - [ ] Add to Home Screen → kill network → relaunch → app shell loads
 - [ ] Settings shows storage estimate
+- [ ] In a browser tab (not installed): red **"Your data could be lost"** bar shows on every screen; tapping it opens the install guide
+- [ ] After Add to Home Screen → relaunch from the icon → the red bar is gone and **Settings → Eviction protection** shows **Safe**
+- [ ] **Settings → Backup → Back up now** writes `outfit-planner-backup.json` (iPhone: Share sheet → Save to Files; desktop: pick/overwrite the file)
+- [ ] Clear data (or use a fresh profile) → relaunch → one-time **Restore your data?** prompt appears with the iPhone "where's my backup" hint
+- [ ] Restore from that backup file → all items/outfits/trips return
 
 ### Cross-browser sanity
 
@@ -110,8 +127,10 @@ outfit-planner/
 │   ├── store.js            # items/outfits/trips/dayPlans CRUD + aggregate helpers
 │   ├── image.js            # File → resized JPEG Blob + objectURL lifecycle
 │   ├── exporter.js         # JSON export / import (blob ↔ base64)
+│   ├── storage.js          # Persist request + eviction-protection state
+│   ├── backup.js           # Single-file backup/restore + reminder logic
 │   ├── vendor/idb.js       # Vendored idb library (Jake Archibald)
-│   ├── components/         # nav.js, outfit-stack.js, picker.js
+│   ├── components/         # nav.js, outfit-stack.js, picker.js, storage-banner.js, backup-prompts.js
 │   └── views/              # trips, trip-detail, outfits, outfit-editor, items, item-editor, settings
 └── tests/                  # In-browser test harness + suite
 ```
@@ -130,4 +149,4 @@ outfit-planner/
 - **Blank page when opening `index.html`** — you opened a `file://` URL. Run `serve.bat` / `serve.sh` and open `http://127.0.0.1:5173/`.
 - **"Brave Shields blocked storage"** — lower shields for this site, or use Standard mode.
 - **Export file opens in browser instead of downloading on iOS** — use **Settings → Copy export as text** and paste into a note.
-- **Data disappeared after a week** — WebKit evicts IndexedDB for sites not on the home screen. Always Add to Home Screen and export regularly.
+- **Data disappeared after a week** — WebKit evicts IndexedDB for sites that live in a browser tab (not on the Home Screen) after ~7 days. The app now requests persistent storage on launch and shows a red warning bar until you **Add to Home Screen** (installed PWAs are exempt). As a second safety net, take the daily one-tap **Backup** — if data is ever lost, open the app and use the **Restore** prompt (or **Settings → Restore from backup**).

@@ -10,6 +10,14 @@ import { blobToBase64, base64ToBlob, buildExport, importFromObject, SCHEMA_VERSI
 import * as db from '../js/db.js';
 import { items, outfits, trips, dayPlans, daysBetween, formatDayLabel, formatDateRange, tripShoppingList, tripStats } from '../js/store.js';
 import { renderOutfitsCanvas, canvasToBlob, shareOutfits } from '../js/share.js';
+import { isStandalone, isPersisted, isStorageProtected, isIOS } from '../js/storage.js';
+import {
+  shouldRemindBackup, isEmptyCounts, BACKUP_FILENAME, BACKUP_INTERVAL_MS,
+  getCounts, isDatabaseEmpty, restoreFromFile, supportsFileSystemAccess, supportsShareFile,
+  getLastBackupAt, setLastBackupAt, LAST_BACKUP_KEY
+} from '../js/backup.js';
+import { openInstallGuide, refreshStorageBanner } from '../js/components/storage-banner.js';
+import { showBackupReminder, showRestorePrompt } from '../js/components/backup-prompts.js';
 
 const TEST_DB = 'outfit-planner-test';
 
@@ -751,6 +759,181 @@ test('share.shareOutfits: filename for multi-outfit share uses count, not a sing
 
 test('share.shareOutfits: rejects empty outfits array', async () => {
   await assertThrows(() => shareOutfits([], new Map()), 'No outfits');
+});
+
+// ----- Storage protection helpers -----
+test('storage.isStandalone returns a boolean', () => {
+  assertEq(typeof isStandalone(), 'boolean');
+});
+test('storage.isPersisted resolves to a boolean', async () => {
+  assertEq(typeof (await isPersisted()), 'boolean');
+});
+test('storage.isStorageProtected resolves to a boolean', async () => {
+  assertEq(typeof (await isStorageProtected()), 'boolean');
+});
+test('storage.isIOS returns a boolean', () => {
+  assertEq(typeof isIOS(), 'boolean');
+});
+
+// ----- Backup pure logic -----
+test('backup.BACKUP_FILENAME is stable (no date — single file gets overwritten, not piled up)', () => {
+  assertEq(BACKUP_FILENAME, 'outfit-planner-backup.json');
+  assertTrue(!/\d{4}-\d{2}-\d{2}/.test(BACKUP_FILENAME), 'filename must not contain a date');
+});
+test('backup.shouldRemindBackup: no data → never remind', () => {
+  assertEq(shouldRemindBackup({ lastBackupAt: null, now: Date.now(), hasData: false }), false);
+});
+test('backup.shouldRemindBackup: has data but never backed up → remind', () => {
+  assertEq(shouldRemindBackup({ lastBackupAt: null, now: Date.now(), hasData: true }), true);
+});
+test('backup.shouldRemindBackup: backed up 1h ago → do not remind', () => {
+  const now = Date.now();
+  const oneHourAgo = new Date(now - 3600 * 1000).toISOString();
+  assertEq(shouldRemindBackup({ lastBackupAt: oneHourAgo, now, hasData: true }), false);
+});
+test('backup.shouldRemindBackup: backed up >24h ago → remind', () => {
+  const now = Date.now();
+  const old = new Date(now - BACKUP_INTERVAL_MS - 1000).toISOString();
+  assertEq(shouldRemindBackup({ lastBackupAt: old, now, hasData: true }), true);
+});
+test('backup.shouldRemindBackup: unparseable timestamp → remind (fail-safe)', () => {
+  assertEq(shouldRemindBackup({ lastBackupAt: 'not-a-date', now: Date.now(), hasData: true }), true);
+});
+test('backup.isEmptyCounts: empty / null → true; any count → false', () => {
+  assertEq(isEmptyCounts(null), true);
+  assertEq(isEmptyCounts({ items: 0, outfits: 0, trips: 0, dayPlans: 0 }), true);
+  assertEq(isEmptyCounts({ items: 0, outfits: 0, trips: 0, dayPlans: 2 }), false);
+  assertEq(isEmptyCounts({ items: 3 }), false);
+});
+test('backup.supports* return booleans', () => {
+  assertEq(typeof supportsFileSystemAccess(), 'boolean');
+  assertEq(typeof supportsShareFile(), 'boolean');
+});
+test('backup.last-backup timestamp round-trips through localStorage', () => {
+  const prev = getLastBackupAt();
+  try {
+    const iso = '2026-05-01T00:00:00.000Z';
+    setLastBackupAt(iso);
+    assertEq(getLastBackupAt(), iso);
+  } finally {
+    if (prev == null) localStorage.removeItem(LAST_BACKUP_KEY); else setLastBackupAt(prev);
+  }
+});
+
+// ----- Backup integration (test DB) -----
+test('backup.getCounts + isDatabaseEmpty: empty DB reports empty', async () => {
+  await withTestDb();
+  assertEq(await isDatabaseEmpty(), true);
+  assertEq(await getCounts(), { items: 0, outfits: 0, trips: 0, dayPlans: 0 });
+});
+test('backup.isDatabaseEmpty: false once an item exists', async () => {
+  await withTestDb();
+  await items.put({ name: 'X', category: 'top', owned: true });
+  assertEq(await isDatabaseEmpty(), false);
+  assertEq((await getCounts()).items, 1);
+});
+test('backup.restoreFromFile: imports a backup File and restores data into an empty DB', async () => {
+  await withTestDb();
+  await items.put({ name: 'Keep me', category: 'top', owned: true });
+  const json = JSON.stringify(await buildExport());
+  await withTestDb(); // wipe to simulate an evicted / blank app
+  assertEq(await isDatabaseEmpty(), true);
+  const file = new File([json], BACKUP_FILENAME, { type: 'application/json' });
+  const res = await restoreFromFile(file, { mode: 'replace' });
+  assertTrue(res.ok, 'restore reports ok');
+  const all = await items.all();
+  assertEq(all.length, 1);
+  assertEq(all[0].name, 'Keep me');
+});
+
+// ----- UI tests -----
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+function ensureUiRoots() {
+  if (!document.getElementById('modal-root')) {
+    const m = document.createElement('div'); m.id = 'modal-root'; document.body.appendChild(m);
+  }
+  if (!document.getElementById('toast-root')) {
+    const t = document.createElement('div'); t.id = 'toast-root'; document.body.appendChild(t);
+  }
+}
+function currentSheet() {
+  const root = document.getElementById('modal-root');
+  return root ? root.querySelector('dialog.sheet, .sheet-fallback') : null;
+}
+function closeAllSheets() {
+  const root = document.getElementById('modal-root');
+  if (!root) return;
+  root.querySelectorAll('dialog.sheet, .sheet-fallback').forEach(d => {
+    try { if (d.close) d.close(); } catch {}
+    d.remove();
+  });
+}
+function setupShellDom() {
+  let main = document.querySelector('.app-main');
+  if (!main) { main = document.createElement('div'); main.className = 'app-main'; document.body.appendChild(main); }
+  let banner = document.getElementById('storage-banner');
+  if (!banner) { banner = document.createElement('div'); banner.id = 'storage-banner'; banner.hidden = true; main.appendChild(banner); }
+  return { main, banner };
+}
+
+test('UI: storage banner reflects protection state (shown + tappable when unprotected)', async () => {
+  ensureUiRoots();
+  const { main, banner } = setupShellDom();
+  // Best-effort force "unprotected" so the shown-branch is deterministic.
+  const orig = (navigator.storage && navigator.storage.persisted) || null;
+  if (navigator.storage) { try { navigator.storage.persisted = async () => false; } catch {} }
+  try {
+    await refreshStorageBanner();
+    const persistedNow = await isPersisted();
+    if (!isStandalone() && !persistedNow) {
+      assertEq(banner.hidden, false);
+      const btn = banner.querySelector('.storage-banner-btn');
+      assertTrue(btn, 'banner renders a button');
+      assertTrue(/lost|risk|protect|home screen/i.test(btn.textContent), 'shows a warning + CTA');
+      assertTrue(main.classList.contains('has-storage-banner'), 'shell flags the banner for layout');
+    } else {
+      // Protected environment → bar must be hidden.
+      assertEq(banner.hidden, true);
+    }
+  } finally {
+    if (navigator.storage && orig) { try { navigator.storage.persisted = orig; } catch {} }
+    banner.remove();
+  }
+});
+
+test('UI: openInstallGuide opens a sheet with Add-to-Home-Screen / install guidance', () => {
+  ensureUiRoots();
+  closeAllSheets();
+  openInstallGuide();
+  const dlg = currentSheet();
+  assertTrue(dlg, 'a sheet opened');
+  assertTrue(/Home Screen|Install app/.test(dlg.textContent || ''), 'mentions the install path');
+  closeAllSheets();
+});
+
+test('UI: showBackupReminder opens a sheet with "Back up now" and "Later"', () => {
+  ensureUiRoots();
+  closeAllSheets();
+  showBackupReminder(null);
+  const dlg = currentSheet();
+  assertTrue(dlg, 'a sheet opened');
+  const labels = [...dlg.querySelectorAll('button')].map(b => b.textContent);
+  assertTrue(labels.some(t => /Back up now/i.test(t)), 'has a Back up now button');
+  assertTrue(labels.some(t => /Later/i.test(t)), 'has a Later button');
+  closeAllSheets();
+});
+
+test('UI: showRestorePrompt opens a sheet with restore + start-fresh options', async () => {
+  ensureUiRoots();
+  closeAllSheets();
+  showRestorePrompt(); // async internally; give the sheet a tick to mount
+  await wait(40);
+  const dlg = currentSheet();
+  assertTrue(dlg, 'a sheet opened');
+  const text = dlg.textContent || '';
+  assertTrue(/Start fresh/.test(text), 'has Start fresh');
+  assertTrue(/backup file/i.test(text), 'offers a backup file chooser');
+  closeAllSheets();
 });
 
 // ---- Runner ----
