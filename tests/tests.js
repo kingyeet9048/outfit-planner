@@ -18,6 +18,7 @@ import {
 } from '../js/backup.js';
 import { openInstallGuide, refreshStorageBanner } from '../js/components/storage-banner.js';
 import { showBackupReminder, showRestorePrompt } from '../js/components/backup-prompts.js';
+import { shouldPromptUpdate, showUpdateBanner, dismissUpdateBanner, UPDATE_CHECK_INTERVAL_MS } from '../js/update.js';
 
 const TEST_DB = 'outfit-planner-test';
 
@@ -1012,6 +1013,43 @@ test('UI: showRestorePrompt opens a sheet with restore + start-fresh options', a
   assertTrue(/Start fresh/.test(text), 'has Start fresh');
   assertTrue(/backup file/i.test(text), 'offers a backup file chooser');
   closeAllSheets();
+});
+
+// ----- PWA update flow tests -----
+test('update.shouldPromptUpdate: installed + has controller → prompt (real update)', () => {
+  assertEq(shouldPromptUpdate('installed', true), true);
+});
+test('update.shouldPromptUpdate: installed but no controller → no prompt (first install)', () => {
+  assertEq(shouldPromptUpdate('installed', false), false);
+});
+test('update.shouldPromptUpdate: non-installed states → no prompt', () => {
+  assertEq(shouldPromptUpdate('installing', true), false);
+  assertEq(shouldPromptUpdate('activated', true), false);
+  assertEq(shouldPromptUpdate('redundant', true), false);
+});
+test('update.UPDATE_CHECK_INTERVAL_MS is a positive interval (30 min)', () => {
+  assertTrue(typeof UPDATE_CHECK_INTERVAL_MS === 'number' && UPDATE_CHECK_INTERVAL_MS > 0, 'positive');
+  assertEq(UPDATE_CHECK_INTERVAL_MS, 30 * 60 * 1000);
+});
+test('UI: showUpdateBanner renders a Reload action that fires the callback; dismiss removes it', () => {
+  dismissUpdateBanner();
+  let reloaded = 0;
+  const banner = showUpdateBanner(() => { reloaded++; });
+  assertTrue(document.getElementById('update-banner'), 'banner mounted');
+  assertTrue(/new version/i.test(banner.textContent), 'has update copy');
+  const reloadBtn = banner.querySelector('.update-reload-btn');
+  assertTrue(reloadBtn, 'has reload button');
+  reloadBtn.click();
+  assertEq(reloaded, 1);
+  dismissUpdateBanner();
+  assertTrue(!document.getElementById('update-banner'), 'dismiss removes banner');
+});
+test('UI: showUpdateBanner is idempotent — only one banner at a time', () => {
+  dismissUpdateBanner();
+  showUpdateBanner(() => {});
+  showUpdateBanner(() => {});
+  assertEq(document.querySelectorAll('#update-banner').length, 1);
+  dismissUpdateBanner();
 });
 
 // ---- Runner ----

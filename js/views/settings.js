@@ -7,6 +7,7 @@ import {
   forgetDestination, supportsFileSystemAccess, destinationLabel
 } from '../backup.js';
 import { openInstallGuide } from '../components/storage-banner.js';
+import { checkForUpdates, forceRefresh } from '../update.js';
 
 const LAST_EXPORT_KEY = 'outfit-planner:lastExportedAt';
 
@@ -155,6 +156,23 @@ export async function view() {
     ])
   ]));
 
+  // --- App / updates ---
+  root.appendChild(el('div', { class: 'settings-group' }, [
+    el('h3', null, 'App'),
+    el('div', { class: 'settings-card' }, [
+      settingsRow({
+        label: 'Check for updates',
+        sub: 'Pull the latest version if one is available.',
+        control: el('button', { type: 'button', class: 'btn btn-secondary btn-sm', onClick: onCheckUpdates }, 'Check')
+      }),
+      settingsRow({
+        label: 'Force refresh',
+        sub: "Stuck on an old version? Clears the app cache and reloads. Your data isn't affected.",
+        control: el('button', { type: 'button', class: 'btn btn-ghost btn-sm', onClick: onForceRefresh }, 'Refresh')
+      })
+    ])
+  ]));
+
   // --- About ---
   root.appendChild(el('div', { class: 'settings-group' }, [
     el('h3', null, 'About'),
@@ -162,6 +180,31 @@ export async function view() {
       settingsRow({ label: 'Outfit Planner', sub: 'v1.0 · Offline-first PWA' })
     ])
   ]));
+
+  async function onCheckUpdates(e) {
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = 'Checking…';
+    try {
+      const res = await checkForUpdates();
+      if (res.updateAvailable) toast('Update found — tap Reload', { kind: 'success' });
+      else if (res.ok) toast("You're on the latest version", { kind: 'success' });
+      else toast('Updates unavailable in this browser', { kind: 'danger' });
+    } catch {
+      toast('Could not check for updates', { kind: 'danger' });
+    } finally {
+      btn.disabled = false; btn.textContent = 'Check';
+    }
+  }
+
+  async function onForceRefresh() {
+    const ok = await confirm({
+      title: 'Force refresh?',
+      message: 'This clears the cached app files and reloads to fetch the latest version. Your items, outfits and trips are not affected.',
+      confirmLabel: 'Refresh now'
+    });
+    if (!ok) return;
+    await forceRefresh();
+  }
 
   async function onExport() {
     try {
