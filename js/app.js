@@ -2,6 +2,9 @@ import { register, start, setRouteChangeHandler } from './router.js';
 import { renderNav } from './components/nav.js';
 import { releaseAll } from './image.js';
 import { toast } from './ui.js';
+import { requestPersistence } from './storage.js';
+import { refreshStorageBanner } from './components/storage-banner.js';
+import { runBackupPrompts } from './components/backup-prompts.js';
 
 // ---- Register routes ----
 register('/', () => import('./views/trips.js').then(m => m.view({})));
@@ -20,12 +23,31 @@ register('/settings', () => import('./views/settings.js').then(m => m.view({})))
 
 setRouteChangeHandler(({ path }) => {
   renderNav(path);
+  // Keep the eviction-warning bar in sync on every navigation (cheap, and the
+  // protection state can change while the app is open).
+  refreshStorageBanner();
 });
 
 // ---- Boot ----
 function boot() {
   // Initial nav render before first route resolves
   renderNav(location.hash || '#/');
+
+  // Eviction protection (Tier 1): ask the browser to keep our storage, then
+  // show / hide the warning bar based on whether we're actually protected.
+  requestPersistence().finally(refreshStorageBanner);
+  // Re-check when the app regains focus or its install state changes — e.g. the
+  // user just added it to the Home Screen and came back.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshStorageBanner();
+  });
+  try {
+    window.matchMedia('(display-mode: standalone)').addEventListener('change', refreshStorageBanner);
+  } catch {}
+
+  // Backup prompts (Tier 2): restore-on-blank, or the 24h backup reminder.
+  // Deferred so the first view paints first.
+  setTimeout(() => { runBackupPrompts().catch(() => {}); }, 800);
 
   // Topbar scroll shadow
   const topbar = document.getElementById('topbar');

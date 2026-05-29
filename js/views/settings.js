@@ -1,6 +1,12 @@
 import { el, renderTopbar, toast, confirm, sheet } from '../ui.js';
 import { downloadExport, exportAsString, importFromObject } from '../exporter.js';
 import { getDb } from '../db.js';
+import { isStorageProtected, isStandalone } from '../storage.js';
+import {
+  backupNow, getLastBackupAt, chooseDestination, hasReusableDestination,
+  forgetDestination, supportsFileSystemAccess, destinationLabel
+} from '../backup.js';
+import { openInstallGuide } from '../components/storage-banner.js';
 
 const LAST_EXPORT_KEY = 'outfit-planner:lastExportedAt';
 
@@ -35,12 +41,107 @@ export async function view() {
   ]);
   root.appendChild(dataGroup);
 
+  // --- Backup group (automatic safety net) ---
+  const backupGroup = el('div', { class: 'settings-group' }, [el('h3', null, 'Backup')]);
+  const backupCard = el('div', { class: 'settings-card' });
+  backupGroup.appendChild(backupCard);
+  root.appendChild(backupGroup);
+  renderBackupCard(backupCard);
+
   // --- Storage group ---
   const storageGroup = el('div', { class: 'settings-group' }, [el('h3', null, 'Storage')]);
   const storageCard = el('div', { class: 'settings-card' });
+  const protectionTarget = el('div');
+  const usageTarget = el('div');
+  storageCard.append(protectionTarget, usageTarget);
   storageGroup.appendChild(storageCard);
   root.appendChild(storageGroup);
-  loadStorageEstimate(storageCard);
+  loadProtectionStatus(protectionTarget);
+  loadStorageEstimate(usageTarget);
+
+  async function renderBackupCard(card) {
+    const last = getLastBackupAt();
+    const rows = [
+      settingsRow({
+        label: 'Back up now',
+        sub: last ? `Last backup ${formatRelative(last)}` : 'Not backed up yet',
+        control: el('button', { type: 'button', class: 'btn btn-primary btn-sm', onClick: onBackupNow }, 'Back up')
+      }),
+      settingsRow({
+        label: 'Backup destination',
+        sub: `Saves a single file to ${destinationLabel()} — overwritten each time, so backups never pile up.`,
+        control: null
+      })
+    ];
+    if (supportsFileSystemAccess()) {
+      const reusable = await hasReusableDestination().catch(() => false);
+      rows.push(settingsRow({
+        label: reusable ? 'Backup file chosen' : 'Choose backup file',
+        sub: reusable ? 'One-click backups overwrite this file.' : 'Pick a file once; later backups overwrite it.',
+        control: el('div', { style: { display: 'flex', gap: '6px' } }, [
+          el('button', { type: 'button', class: 'btn btn-secondary btn-sm', onClick: onChooseDestination }, reusable ? 'Change' : 'Choose'),
+          reusable ? el('button', { type: 'button', class: 'btn btn-ghost btn-sm', onClick: onForgetDestination }, 'Forget') : null
+        ])
+      }));
+    }
+    rows.push(settingsRow({
+      label: 'Restore from backup',
+      sub: 'Replaces current data with a backup file.',
+      control: el('label', { class: 'btn btn-secondary btn-sm', style: { cursor: 'pointer' } }, [
+        el('input', { type: 'file', accept: '.json,application/json', style: { display: 'none' }, onChange: onRestoreFile }),
+        'Restore'
+      ])
+    }));
+    card.replaceChildren(...rows);
+  }
+
+  async function onBackupNow() {
+    try {
+      const res = await backupNow({ allowPrompt: true });
+      if (res.method === 'cancelled') return;
+      toast('Backup saved', { kind: 'success' });
+      renderBackupCard(backupCard);
+    } catch (err) {
+      toast('Backup failed: ' + (err && err.message ? err.message : 'unknown error'), { kind: 'danger' });
+    }
+  }
+
+  async function onChooseDestination() {
+    const res = await chooseDestination();
+    if (res.ok) {
+      toast('Backup file set', { kind: 'success' });
+      renderBackupCard(backupCard);
+    } else if (res.reason === 'error') {
+      toast('Could not set backup file', { kind: 'danger' });
+    }
+  }
+
+  async function onForgetDestination() {
+    await forgetDestination();
+    renderBackupCard(backupCard);
+  }
+
+  async function onRestoreFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    let parsed;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch (err) {
+      toast('Could not read file: ' + err.message, { kind: 'danger' });
+      return;
+    }
+    const mode = await chooseImportMode();
+    if (!mode) return;
+    try {
+      const counts = await importFromObject(parsed, { mode });
+      toast(`Restored ${counts.items} items, ${counts.outfits} outfits, ${counts.trips} trips`, { kind: 'success' });
+      loadStorageEstimate(usageTarget);
+    } catch (err) {
+      toast('Restore failed: ' + err.message, { kind: 'danger' });
+    }
+  }
 
   // --- Danger group ---
   root.appendChild(el('div', { class: 'settings-group' }, [
@@ -177,6 +278,24 @@ function settingsRow({ label, sub, control }) {
     ]),
     control || null
   ]);
+}
+
+async function loadProtectionStatus(target) {
+  let prot = false;
+  try { prot = await isStorageProtected(); } catch {}
+  if (prot) {
+    target.replaceChildren(settingsRow({
+      label: 'Eviction protection',
+      sub: isStandalone() ? 'Protected — running as an installed app.' : 'Protected — persistent storage granted.',
+      control: el('span', { class: 'status-pill status-ok', 'aria-hidden': 'true' }, '✓ Safe')
+    }));
+  } else {
+    target.replaceChildren(settingsRow({
+      label: 'Eviction protection',
+      sub: 'At risk — your browser can clear this app’s data. Add it to your Home Screen.',
+      control: el('button', { type: 'button', class: 'btn btn-danger btn-sm', onClick: () => openInstallGuide() }, 'Protect')
+    }));
+  }
 }
 
 async function loadStorageEstimate(target) {

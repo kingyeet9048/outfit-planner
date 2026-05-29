@@ -83,6 +83,52 @@ html, body { background: var(--bg); color: var(--text); font-family: var(--font)
   outline: none;
 }
 
+/* ---------- Storage-at-risk banner ---------- */
+/* Persistent, full-width red call-to-action. Sticks above the topbar so it is
+   visible on every page until the app is installed / storage is persisted. */
+.storage-banner {
+  position: sticky; top: 0; z-index: 60;
+  background: var(--danger);
+  padding-top: env(safe-area-inset-top);
+  box-shadow: var(--shadow-sm);
+}
+.storage-banner[hidden] { display: none; }
+.storage-banner-btn {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; min-height: 52px; padding: 10px 16px;
+  background: var(--danger); color: #fff;
+  border: none; font: inherit; text-align: left;
+  cursor: pointer; touch-action: manipulation;
+  transition: filter .12s;
+}
+.storage-banner-btn:hover { filter: brightness(1.06); }
+.storage-banner-btn:active { filter: brightness(.9); }
+.storage-banner-icon { font-size: 20px; flex: none; }
+.storage-banner-text { display: flex; flex-direction: column; line-height: 1.25; flex: 1; min-width: 0; }
+.storage-banner-text strong { font-size: 14px; font-weight: 700; }
+.storage-banner-sub { font-size: 12px; opacity: .92; }
+.storage-banner-chevron { font-size: 24px; font-weight: 700; flex: none; opacity: .9; }
+
+/* When the banner is showing, the sticky topbar sits directly below it and the
+   banner owns the safe-area inset. */
+.has-storage-banner .topbar { top: var(--storage-banner-h, 0px); padding-top: 0; }
+
+/* ---------- Install / restore / backup sheets ---------- */
+.install-guide .guide-intro, .restore-prompt > p, .backup-reminder > p { margin-bottom: 12px; color: var(--text-muted); }
+.guide-steps { margin: 0 0 12px 1.1em; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.guide-steps li { line-height: 1.4; }
+.guide-glyph { font-family: -apple-system, system-ui, sans-serif; }
+.guide-foot { margin-top: 12px; }
+.restore-hint {
+  background: var(--surface-2); border-radius: var(--radius-sm);
+  padding: 12px 14px; margin-bottom: 14px; font-size: 14px;
+}
+.restore-hint strong { display: block; margin-bottom: 6px; }
+.restore-hint ul { margin: 0 0 0 1.1em; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.restore-hint li { line-height: 1.35; }
+.status-pill { font-size: 13px; font-weight: 700; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+.status-pill.status-ok { background: var(--success-soft); color: var(--success); }
+
 /* ---------- Bottom tab bar ---------- */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0;
