@@ -20,13 +20,14 @@ import { getDb } from './db.js';
 import { openDB } from './vendor/idb.js';
 
 export const BACKUP_FILENAME = 'outfit-planner-backup.json';
-export const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24h
+export const BACKUP_INTERVAL_MS = 6 * 24 * 60 * 60 * 1000; // 6 days
 export const LAST_BACKUP_KEY = 'outfit-planner:lastBackupAt';
 
 // ---------- Pure decision helpers (unit-tested) ----------
 
 // Whether to nudge the user to back up. We only nag when there is data worth
-// protecting and it has been a full day (or never) since the last backup.
+// protecting and it has been at least the backup interval (or never) since the
+// last backup.
 export function shouldRemindBackup({ lastBackupAt, now, hasData }) {
   if (!hasData) return false;
   if (!lastBackupAt) return true;
