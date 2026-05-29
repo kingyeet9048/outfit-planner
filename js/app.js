@@ -5,6 +5,7 @@ import { toast } from './ui.js';
 import { requestPersistence } from './storage.js';
 import { refreshStorageBanner } from './components/storage-banner.js';
 import { runBackupPrompts } from './components/backup-prompts.js';
+import { setupUpdates } from './update.js';
 
 // ---- Register routes ----
 register('/', () => import('./views/trips.js').then(m => m.view({})));
@@ -86,14 +87,9 @@ function boot() {
   });
   window.addEventListener('pagehide', releaseAll);
 
-  // Service worker
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./service-worker.js').catch((err) => {
-        console.warn('SW registration failed', err);
-      });
-    });
-  }
+  // Service worker registration + update flow (checks for new versions on
+  // launch, periodically, on resume, and on reconnect; offers a one-tap reload).
+  setupUpdates();
 
   start();
 }

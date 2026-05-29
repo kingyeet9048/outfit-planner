@@ -28,7 +28,7 @@ Open `index.html` directly via `file://` will NOT work — browsers block JavaSc
 
 Either script tries `python -m http.server`, then falls back to `npx serve`. Then open <http://127.0.0.1:5173/>.
 
-To run the test suite, open <http://127.0.0.1:5173/tests/test.html> — it runs automatically and reports pass/fail counts inline. There are 78 tests covering pure logic (UUID, routing, date helpers, blob ↔ base64 roundtrip, backup-reminder timing, empty-DB detection), IndexedDB integration (CRUD, cascade deletes, shopping list, export/import, restore-from-file), and UI smoke tests (storage warning bar, install guide, backup/restore prompts).
+To run the test suite, open <http://127.0.0.1:5173/tests/test.html> — it runs automatically and reports pass/fail counts inline. There are 98 tests covering pure logic (UUID, routing, date helpers, blob ↔ base64 roundtrip, backup-reminder timing, empty-DB detection, retailer grouping, update-prompt logic), IndexedDB integration (CRUD, cascade deletes, shopping list, export/import, restore-from-file), and UI smoke tests (storage warning bar, install guide, backup/restore prompts, update banner).
 
 ## Deploying to GitHub Pages
 
@@ -90,6 +90,9 @@ Before declaring a release ready, walk through this on the device you actually u
 - [ ] **Export** → clear data → **Import** → all items/outfits/trips/days restored, images included
 - [ ] Add to Home Screen → kill network → relaunch → app shell loads
 - [ ] Settings shows storage estimate
+- [ ] Deploy a new version → within ~30 min (or on reopen) a **"new version available — Reload"** banner appears; tapping it reloads into the new version
+- [ ] **Settings → App → Check for updates** reports up-to-date or surfaces the Reload banner
+- [ ] **Settings → App → Force refresh** reloads the app and data (items/outfits/trips) is still intact
 - [ ] In a browser tab (not installed): red **"Your data could be lost"** bar shows on every screen; tapping it opens the install guide
 - [ ] After Add to Home Screen → relaunch from the icon → the red bar is gone and **Settings → Eviction protection** shows **Safe**
 - [ ] **Settings → Backup → Back up now** writes `outfit-planner-backup.json` (iPhone: Share sheet → Save to Files; desktop: pick/overwrite the file)
@@ -144,6 +147,7 @@ outfit-planner/
 - Top-down anatomical ordering (accessories → top → pant → shoes) is used consistently in the outfit editor, outfit cards, and trip-day rows.
 - Single accent color; content imagery carries visual richness.
 - Respects `prefers-color-scheme` (auto dark mode) and `prefers-reduced-motion`.
+- **Updates**: the service worker uses network-first for navigations and stale-while-revalidate for assets, and the app checks for a new version on launch, every 30 min, on resume, and on reconnect. When a new version is waiting it shows a one-tap **Reload** banner (skipWaiting + `controllerchange` reload). **Settings → App** also offers **Check for updates** and a **Force refresh** (clears Cache Storage — not IndexedDB — and reloads) for when an installed iOS PWA gets stuck on an old build.
 
 ## Troubleshooting
 
@@ -151,3 +155,4 @@ outfit-planner/
 - **"Brave Shields blocked storage"** — lower shields for this site, or use Standard mode.
 - **Export file opens in browser instead of downloading on iOS** — use **Settings → Copy export as text** and paste into a note.
 - **Data disappeared after a week** — WebKit evicts IndexedDB for sites that live in a browser tab (not on the Home Screen) after ~7 days. The app now requests persistent storage on launch and shows a red warning bar until you **Add to Home Screen** (installed PWAs are exempt). As a second safety net, take the periodic one-tap **Backup** — if data is ever lost, open the app and use the **Restore** prompt (or **Settings → Restore from backup**).
+- **Installed app won't update / stuck on an old version** — the app auto-checks and shows a **Reload** banner when a new version is ready, but if it's wedged, use **Settings → App → Force refresh** (clears the cache and reloads; your data is untouched). As a last resort on iOS, **Export** your data, delete and re-add the Home-Screen app, then **Import**.
