@@ -320,3 +320,96 @@ export async function tripStats(tripId) {
   const shopping = await tripShoppingList(tripId);
   return { totalDays: allDays.length, plannedDays: planned, toBuy: shopping.length };
 }
+
+// ---------- Retailer grouping (shopping list "where to buy") ----------
+
+// Some purchase links are shorteners / alternate domains that don't reveal the
+// real store. We can't follow redirects offline, so fold known ones into their
+// retailer here. Keyed by registrable domain.
+const DOMAIN_ALIASES = {
+  'amzn.to': { key: 'amazon.com', label: 'Amazon' },  // Amazon link shortener
+  'a.co': { key: 'amazon.com', label: 'Amazon' }       // Amazon short links
+};
+
+// Nicer display names for common stores; otherwise we Title-case the domain.
+const KNOWN_RETAILERS = {
+  amazon: 'Amazon', walmart: 'Walmart', target: 'Target', bestbuy: 'Best Buy',
+  ebay: 'eBay', etsy: 'Etsy', nike: 'Nike', adidas: 'Adidas', zara: 'Zara',
+  hm: 'H&M', uniqlo: 'Uniqlo', nordstrom: 'Nordstrom', macys: "Macy's",
+  asos: 'ASOS', shein: 'SHEIN', aliexpress: 'AliExpress', costco: 'Costco',
+  ikea: 'IKEA', gap: 'Gap', oldnavy: 'Old Navy', lululemon: 'lululemon',
+  sephora: 'Sephora', ulta: 'Ulta', rei: 'REI'
+};
+
+// Registrable-domain detection needs to know common two-level public suffixes
+// (e.g. amazon.co.uk → registrable "amazon.co.uk", not "co.uk").
+const TWO_LEVEL_TLDS = new Set([
+  'co.uk', 'org.uk', 'gov.uk', 'ac.uk', 'me.uk',
+  'co.jp', 'co.kr', 'co.nz', 'co.za', 'co.in', 'co.il',
+  'com.au', 'com.br', 'com.mx', 'com.tr', 'com.cn', 'com.hk', 'com.sg', 'com.tw'
+]);
+
+function titleCase(s) {
+  return s.split(/[-_ ]+/).filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+const NO_STORE = { key: '', label: 'No store link' };
+
+// Derive a stable retailer { key, label } from a purchase URL. Returns a shared
+// "No store link" bucket for empty / unparseable URLs.
+export function retailerFromUrl(url) {
+  const raw = (url || '').trim();
+  if (!raw) return { ...NO_STORE };
+  let host;
+  try {
+    host = new URL(raw).hostname;
+  } catch {
+    // Tolerate URLs the user typed without a scheme ("amazon.com/...").
+    try { host = new URL('https://' + raw).hostname; } catch { return { ...NO_STORE }; }
+  }
+  if (!host) return { ...NO_STORE };
+  host = host.toLowerCase().replace(/^www\./, '');
+  // A real store domain has a dot and only valid hostname chars. This rejects
+  // junk that the lenient scheme-prepend above can coerce into a "hostname"
+  // (e.g. "not a url at all" → "not%20a%20url..."), and bare hosts like localhost.
+  if (!host.includes('.') || !/^[a-z0-9.-]+$/.test(host)) return { ...NO_STORE };
+
+  const parts = host.split('.');
+  let domain, sld;
+  if (parts.length >= 3 && TWO_LEVEL_TLDS.has(parts.slice(-2).join('.'))) {
+    domain = parts.slice(-3).join('.');
+    sld = parts[parts.length - 3];
+  } else if (parts.length >= 2) {
+    domain = parts.slice(-2).join('.');
+    sld = parts[parts.length - 2];
+  } else {
+    domain = host;
+    sld = parts[0];
+  }
+
+  if (DOMAIN_ALIASES[domain]) return { ...DOMAIN_ALIASES[domain] };
+  return { key: domain, label: KNOWN_RETAILERS[sld] || titleCase(sld) };
+}
+
+// Group shopping-list items by retailer. Returns ordered groups
+// [{ key, label, items }] sorted alphabetically by label, with the
+// "No store link" bucket always last; items within a group sorted by name.
+export function groupShoppingByRetailer(itemsArr) {
+  const groups = new Map();
+  for (const it of (itemsArr || [])) {
+    const { key, label } = retailerFromUrl(it.purchaseUrl);
+    if (!groups.has(key)) groups.set(key, { key, label, items: [] });
+    groups.get(key).items.push(it);
+  }
+  const out = [...groups.values()];
+  for (const g of out) {
+    g.items.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+  }
+  out.sort((a, b) => {
+    if (a.key === '' ) return 1;   // ungrouped bucket last
+    if (b.key === '' ) return -1;
+    return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' });
+  });
+  return out;
+}

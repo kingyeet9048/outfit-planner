@@ -494,6 +494,14 @@ html, body { background: var(--bg); color: var(--text); font-family: var(--font)
 .shopping-item .buy-link { color: var(--accent); font-weight: 600; font-size: 13px; padding: 6px 10px; border-radius: var(--radius-sm); }
 .shopping-item .buy-link:hover { background: var(--accent-soft); }
 .shopping-item .mark-owned-btn { font-size: 13px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); }
+/* Grouped-by-store layout */
+.shopping-group { display: flex; flex-direction: column; }
+.shopping-group:not(:first-child) { border-top: 1px solid var(--border); padding-top: 8px; }
+.shopping-group-head { display: flex; align-items: center; gap: 10px; padding: 6px 0 2px; }
+.shopping-group-head .store-avatar { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+.shopping-group-head .store-name { font-weight: 700; font-size: 15px; }
+.shopping-group-head .store-count { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--text-muted); background: var(--surface-2); min-width: 22px; text-align: center; padding: 2px 8px; border-radius: 999px; }
+.shopping-group .shopping-item:first-of-type { border-top: none; }
 
 /* ---------- Modal / bottom sheet ---------- */
 dialog.sheet, .sheet-fallback {

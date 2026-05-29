@@ -8,7 +8,7 @@ A small offline-first web app for planning trip outfits day by day. Built as a s
 - Mark each item as **owned** or **need to buy** so you know what's still outstanding.
 - Combine items into named, reusable **outfits** with anatomical top-down layout (accessories → top → pant → shoes).
 - Create **trips** with a date range, then assign an outfit to each day.
-- Per-trip **shopping list** automatically lists every item referenced anywhere in the trip that you don't own yet.
+- Per-trip **shopping list** automatically lists every item referenced anywhere in the trip that you don't own yet, **grouped by store** (derived from each item's purchase-link domain) so you can knock out one retailer at a time.
 - **Export / import** all data as a single JSON file so you can move it between devices.
 - **Eviction protection**: requests persistent storage on launch and shows a persistent, tappable warning bar until the app is added to the Home Screen (installed PWAs are exempt from WebKit's 7-day storage eviction).
 - **Automatic backup safety net**: a once-a-day prompt backs up everything with one tap to a single, always-overwritten file (no dated copies pile up). If the app ever opens blank, it offers a one-time restore with guidance on finding your backup.
@@ -84,6 +84,7 @@ Before declaring a release ready, walk through this on the device you actually u
 - [ ] Create an outfit with only Top + Shoes (other slots stay dashed)
 - [ ] Create a trip July 1–14, assign different outfits to 5 days
 - [ ] Verify the **Shopping list** at top of trip detail aggregates only unowned items
+- [ ] Shopping list **groups items by store** (e.g. Amazon, Walmart); `amzn.to` short links fold into Amazon; items with no link fall under **No store link** (shown last)
 - [ ] Mark a shopping list item as owned → it disappears live, day rollups update
 - [ ] Try a reversed-date trip (end before start) — should be rejected
 - [ ] **Export** → clear data → **Import** → all items/outfits/trips/days restored, images included
