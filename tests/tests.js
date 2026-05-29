@@ -9,6 +9,7 @@ import { rgbToHsv, colorTone, harmonyScore, classifyHarmony } from '../js/stylis
 import { blobToBase64, base64ToBlob, buildExport, importFromObject, SCHEMA_VERSION } from '../js/exporter.js';
 import * as db from '../js/db.js';
 import { items, outfits, trips, dayPlans, daysBetween, formatDayLabel, formatDateRange, tripShoppingList, tripStats } from '../js/store.js';
+import { renderOutfitsCanvas, canvasToBlob, shareOutfits } from '../js/share.js';
 
 const TEST_DB = 'outfit-planner-test';
 
@@ -550,6 +551,206 @@ test('export/import: bytes preserved for image blob', async () => {
   assertTrue(restored, 'image blob restored');
   const restoredBytes = new Uint8Array(await restored.arrayBuffer());
   assertEq(Array.from(restoredBytes), Array.from(bytes));
+});
+
+// ----- Share API tests -----
+// Create a tiny real PNG via canvas so the renderer's image-bitmap path is exercised
+async function makeTinyImageBlob(color = 'red', size = 16) {
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = color;
+  ctx.fillRect(0, 0, size, size);
+  return await new Promise(res => c.toBlob(b => res(b), 'image/png'));
+}
+
+function setNavShare(canShareFn, shareFn) {
+  try {
+    navigator.canShare = canShareFn;
+    navigator.share = shareFn;
+    if (navigator.canShare === canShareFn && navigator.share === shareFn) return () => {};
+  } catch {}
+  const prevDescCan = Object.getOwnPropertyDescriptor(Navigator.prototype, 'canShare') || Object.getOwnPropertyDescriptor(navigator, 'canShare');
+  const prevDescShare = Object.getOwnPropertyDescriptor(Navigator.prototype, 'share') || Object.getOwnPropertyDescriptor(navigator, 'share');
+  Object.defineProperty(navigator, 'canShare', { configurable: true, writable: true, value: canShareFn });
+  Object.defineProperty(navigator, 'share', { configurable: true, writable: true, value: shareFn });
+  return () => {
+    if (prevDescCan) Object.defineProperty(navigator, 'canShare', prevDescCan);
+    else { try { delete navigator.canShare; } catch {} }
+    if (prevDescShare) Object.defineProperty(navigator, 'share', prevDescShare);
+    else { try { delete navigator.share; } catch {} }
+  };
+}
+
+test('share.renderOutfitsCanvas: single outfit produces a 1080px-wide non-blank canvas', async () => {
+  const blob = await makeTinyImageBlob('red', 32);
+  const top = { id: 't1', name: 'Linen Top', category: 'top', owned: 1, imageBlob: blob };
+  const pant = { id: 'p1', name: 'Black Pant', category: 'pant', owned: 0, imageBlob: blob };
+  const outfit = { id: 'o1', name: 'Test Outfit', topId: 't1', pantId: 'p1', shoesId: null, accessoryIds: [], otherIds: [] };
+  const itemsById = new Map([[top.id, top], [pant.id, pant]]);
+  const canvas = await renderOutfitsCanvas([outfit], itemsById);
+  assertEq(canvas.width, 1080);
+  assertTrue(canvas.height > 400, 'canvas tall enough for title + 2 items');
+  // Sample a top-left background pixel — should match the section bg color #fafafa
+  const px = canvas.getContext('2d').getImageData(0, 0, 1, 1).data;
+  assertEq(Array.from(px).slice(0, 3), [250, 250, 250]);
+  assertEq(px[3], 255); // opaque, never transparent
+});
+
+test('share.renderOutfitsCanvas: multiple outfits stack vertically', async () => {
+  const blob = await makeTinyImageBlob('blue', 32);
+  const top = { id: 't1', name: 'Top', category: 'top', owned: 1, imageBlob: blob };
+  const itemsById = new Map([[top.id, top]]);
+  const one = { id: 'o1', name: 'A', topId: 't1', pantId: null, shoesId: null, accessoryIds: [], otherIds: [] };
+  const two = { id: 'o2', name: 'B', topId: 't1', pantId: null, shoesId: null, accessoryIds: [], otherIds: [] };
+  const c1 = await renderOutfitsCanvas([one], itemsById);
+  const c2 = await renderOutfitsCanvas([one, two], itemsById);
+  assertEq(c2.width, 1080);
+  assertTrue(c2.height > c1.height * 1.5, `two outfits should roughly double the height (was ${c1.height} → ${c2.height})`);
+});
+
+test('share.renderOutfitsCanvas: outfit with no items still renders without throwing', async () => {
+  const outfit = { id: 'o1', name: 'Empty', topId: null, pantId: null, shoesId: null, accessoryIds: [], otherIds: [] };
+  const canvas = await renderOutfitsCanvas([outfit], new Map());
+  assertEq(canvas.width, 1080);
+  assertTrue(canvas.height > 100, 'still has title + footer');
+});
+
+test('share.renderOutfitsCanvas: orphan item ids (item missing from map) are skipped silently', async () => {
+  const outfit = { id: 'o1', name: 'Stale', topId: 'missing', pantId: null, shoesId: null, accessoryIds: ['also-missing'], otherIds: [] };
+  const canvas = await renderOutfitsCanvas([outfit], new Map());
+  assertEq(canvas.width, 1080);
+  assertTrue(canvas.height > 0);
+});
+
+test('share.renderOutfitsCanvas: item with no imageBlob renders category-icon placeholder (no throw)', async () => {
+  const top = { id: 't1', name: 'Top w/o photo', category: 'top', owned: 1, imageBlob: null };
+  const outfit = { id: 'o1', name: 'P', topId: 't1', pantId: null, shoesId: null, accessoryIds: [], otherIds: [] };
+  const canvas = await renderOutfitsCanvas([outfit], new Map([[top.id, top]]));
+  assertTrue(canvas.height > 300);
+});
+
+test('share.renderOutfitsCanvas: never upscales — preserves source resolution for "minimal quality loss"', async () => {
+  // 64×64 source. Canvas should be 1080 wide but image draw should stay 64×64.
+  // We can't easily inspect draw calls; we infer by checking total height is small (no inflated image area).
+  const small = await makeTinyImageBlob('green', 64);
+  const top = { id: 't1', name: 'Tiny', category: 'top', owned: 1, imageBlob: small };
+  const outfit = { id: 'o1', name: 'Single tiny item', topId: 't1', pantId: null, shoesId: null, accessoryIds: [], otherIds: [] };
+  const small1 = await renderOutfitsCanvas([outfit], new Map([[top.id, top]]));
+  // Same outfit with no image should be only marginally shorter — confirming we didn't pad it to ITEM_MAX_IMG_H
+  const top2 = { id: 't1', name: 'Tiny', category: 'top', owned: 1, imageBlob: null };
+  const small2 = await renderOutfitsCanvas([outfit], new Map([[top.id, top2]]));
+  // Item card with 64px tall image should be much shorter than 760px max — ceiling height delta is bounded
+  assertTrue(small1.height < 800, `expected compact canvas, got ${small1.height}`);
+  // sanity: heights are in the same order of magnitude
+  assertTrue(Math.abs(small1.height - small2.height) < 600, 'placeholder vs tiny image height delta is bounded');
+});
+
+test('share.canvasToBlob: produces a PNG with correct signature bytes', async () => {
+  const c = document.createElement('canvas');
+  c.width = 16; c.height = 16;
+  const blob = await canvasToBlob(c);
+  assertEq(blob.type, 'image/png');
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  assertEq(Array.from(bytes.slice(0, 8)), [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+});
+
+test('share.shareOutfits: falls back to a PNG download when Web Share API is unavailable', async () => {
+  const restore = setNavShare(undefined, undefined);
+  let clickedHref = null;
+  let clickedDownload = null;
+  const origCreate = document.createElement.bind(document);
+  document.createElement = function (tag) {
+    const n = origCreate(tag);
+    if (tag === 'a') {
+      n.click = function () { clickedHref = n.href; clickedDownload = n.download; };
+    }
+    return n;
+  };
+  try {
+    const top = { id: 't1', name: 'A', category: 'top', owned: 1, imageBlob: null };
+    const outfit = { id: 'o1', name: 'My Fit', topId: 't1', pantId: null, shoesId: null, accessoryIds: [], otherIds: [] };
+    const result = await shareOutfits([outfit], new Map([[top.id, top]]));
+    assertEq(result.method, 'download');
+    assertTrue(/^outfit-my-fit-\d{4}-\d{2}-\d{2}\.png$/.test(clickedDownload), `filename pattern, got: ${clickedDownload}`);
+    assertTrue(typeof clickedHref === 'string' && clickedHref.startsWith('blob:'), `href was blob URL, got: ${clickedHref}`);
+  } finally {
+    document.createElement = origCreate;
+    restore();
+  }
+});
+
+test('share.shareOutfits: invokes navigator.share with a PNG File when supported', async () => {
+  let payload = null;
+  const restore = setNavShare(
+    ({ files }) => Array.isArray(files) && files.length > 0,
+    async (data) => { payload = data; }
+  );
+  try {
+    const top = { id: 't1', name: 'A', category: 'top', owned: 1, imageBlob: null };
+    const outfit = { id: 'o1', name: 'Share Me', topId: 't1', pantId: null, shoesId: null, accessoryIds: [], otherIds: [] };
+    const result = await shareOutfits([outfit], new Map([[top.id, top]]));
+    assertEq(result.method, 'share');
+    assertTrue(payload && Array.isArray(payload.files) && payload.files.length === 1, 'share() called with 1 file');
+    assertEq(payload.files[0].type, 'image/png');
+    assertEq(payload.title, 'Share Me');
+    assertTrue(payload.files[0].size > 0, 'shared file has bytes');
+  } finally {
+    restore();
+  }
+});
+
+test('share.shareOutfits: AbortError from user cancellation reports "cancelled" without downloading', async () => {
+  let downloadAttempted = false;
+  const origCreate = document.createElement.bind(document);
+  document.createElement = function (tag) {
+    const n = origCreate(tag);
+    if (tag === 'a') {
+      const origClick = n.click.bind(n);
+      n.click = function () { downloadAttempted = true; origClick(); };
+    }
+    return n;
+  };
+  const restore = setNavShare(
+    () => true,
+    async () => { const e = new Error('cancelled'); e.name = 'AbortError'; throw e; }
+  );
+  try {
+    const top = { id: 't1', name: 'A', category: 'top', owned: 1, imageBlob: null };
+    const outfit = { id: 'o1', name: 'X', topId: 't1', pantId: null, shoesId: null, accessoryIds: [], otherIds: [] };
+    const result = await shareOutfits([outfit], new Map([[top.id, top]]));
+    assertEq(result.method, 'cancelled');
+    assertEq(downloadAttempted, false);
+  } finally {
+    document.createElement = origCreate;
+    restore();
+  }
+});
+
+test('share.shareOutfits: filename for multi-outfit share uses count, not a single name', async () => {
+  const restore = setNavShare(undefined, undefined);
+  let filename = null;
+  const origCreate = document.createElement.bind(document);
+  document.createElement = function (tag) {
+    const n = origCreate(tag);
+    if (tag === 'a') n.click = function () { filename = n.download; };
+    return n;
+  };
+  try {
+    const top = { id: 't1', name: 'A', category: 'top', owned: 1, imageBlob: null };
+    const o1 = { id: 'o1', name: 'One', topId: 't1', pantId: null, shoesId: null, accessoryIds: [], otherIds: [] };
+    const o2 = { id: 'o2', name: 'Two', topId: 't1', pantId: null, shoesId: null, accessoryIds: [], otherIds: [] };
+    await shareOutfits([o1, o2], new Map([[top.id, top]]));
+    assertTrue(/^outfits-2-\d{4}-\d{2}-\d{2}\.png$/.test(filename), `multi-outfit filename, got: ${filename}`);
+  } finally {
+    document.createElement = origCreate;
+    restore();
+  }
+});
+
+test('share.shareOutfits: rejects empty outfits array', async () => {
+  await assertThrows(() => shareOutfits([], new Map()), 'No outfits');
 });
 
 // ---- Runner ----
