@@ -11,7 +11,7 @@ A small offline-first web app for planning trip outfits day by day. Built as a s
 - Per-trip **shopping list** automatically lists every item referenced anywhere in the trip that you don't own yet.
 - **Export / import** all data as a single JSON file so you can move it between devices.
 - **Eviction protection**: requests persistent storage on launch and shows a persistent, tappable warning bar until the app is added to the Home Screen (installed PWAs are exempt from WebKit's 7-day storage eviction).
-- **Automatic backup safety net**: a once-a-day prompt backs up everything with one tap to a single, always-overwritten file (no dated copies pile up). If the app ever opens blank, it offers a one-time restore with guidance on finding your backup.
+- **Automatic backup safety net**: every few days a prompt backs up everything with one tap to a single, always-overwritten file (no dated copies pile up). If the app ever opens blank, it offers a one-time restore with guidance on finding your backup.
 - Works offline once loaded (service worker caches the app shell).
 
 ## Local testing (before deploying)
@@ -54,11 +54,11 @@ The app respects iOS safe areas, uses 16px form fields to avoid focus zoom, and 
 
 ## Data portability
 
-Because Safari/WebKit aggressively evicts IndexedDB on sites that aren't added to the home screen, the app pushes you toward two safety nets: **install to the Home Screen** (stops eviction) and a **daily one-tap backup** (survives it).
+Because Safari/WebKit aggressively evicts IndexedDB on sites that aren't added to the home screen, the app pushes you toward two safety nets: **install to the Home Screen** (stops eviction) and a **periodic one-tap backup** (survives it).
 
 ### Automatic backup
 
-- Once a day the app prompts **Back up your data**. One tap writes a single file named `outfit-planner-backup.json`.
+- Every 6 days the app prompts **Back up your data**. One tap writes a single file named `outfit-planner-backup.json`.
   - **iPhone / Safari / Firefox**: the file goes through the native Share sheet — save it to **Files / iCloud Drive**. Saving to the same folder each time *replaces* the previous backup, so dated copies never pile up.
   - **Desktop Chrome / Edge / Brave**: pick the file once in **Settings → Backup → Choose backup file**; every later backup silently overwrites it.
 - If the app opens with **no data** (a fresh device, or eviction wiped it), it shows a one-time **Restore your data?** prompt. On iPhone it tells you where to look: **Files → iCloud Drive / On My iPhone → search `outfit-planner-backup`**.
@@ -149,4 +149,4 @@ outfit-planner/
 - **Blank page when opening `index.html`** — you opened a `file://` URL. Run `serve.bat` / `serve.sh` and open `http://127.0.0.1:5173/`.
 - **"Brave Shields blocked storage"** — lower shields for this site, or use Standard mode.
 - **Export file opens in browser instead of downloading on iOS** — use **Settings → Copy export as text** and paste into a note.
-- **Data disappeared after a week** — WebKit evicts IndexedDB for sites that live in a browser tab (not on the Home Screen) after ~7 days. The app now requests persistent storage on launch and shows a red warning bar until you **Add to Home Screen** (installed PWAs are exempt). As a second safety net, take the daily one-tap **Backup** — if data is ever lost, open the app and use the **Restore** prompt (or **Settings → Restore from backup**).
+- **Data disappeared after a week** — WebKit evicts IndexedDB for sites that live in a browser tab (not on the Home Screen) after ~7 days. The app now requests persistent storage on launch and shows a red warning bar until you **Add to Home Screen** (installed PWAs are exempt). As a second safety net, take the periodic one-tap **Backup** — if data is ever lost, open the app and use the **Restore** prompt (or **Settings → Restore from backup**).

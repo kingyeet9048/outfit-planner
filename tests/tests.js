@@ -786,18 +786,21 @@ test('backup.shouldRemindBackup: no data → never remind', () => {
 test('backup.shouldRemindBackup: has data but never backed up → remind', () => {
   assertEq(shouldRemindBackup({ lastBackupAt: null, now: Date.now(), hasData: true }), true);
 });
-test('backup.shouldRemindBackup: backed up 1h ago → do not remind', () => {
+test('backup.shouldRemindBackup: backed up well within the interval → do not remind', () => {
   const now = Date.now();
-  const oneHourAgo = new Date(now - 3600 * 1000).toISOString();
-  assertEq(shouldRemindBackup({ lastBackupAt: oneHourAgo, now, hasData: true }), false);
+  const recent = new Date(now - (BACKUP_INTERVAL_MS - 3600 * 1000)).toISOString(); // an hour shy of due
+  assertEq(shouldRemindBackup({ lastBackupAt: recent, now, hasData: true }), false);
 });
-test('backup.shouldRemindBackup: backed up >24h ago → remind', () => {
+test('backup.shouldRemindBackup: backed up just past the interval → remind', () => {
   const now = Date.now();
   const old = new Date(now - BACKUP_INTERVAL_MS - 1000).toISOString();
   assertEq(shouldRemindBackup({ lastBackupAt: old, now, hasData: true }), true);
 });
 test('backup.shouldRemindBackup: unparseable timestamp → remind (fail-safe)', () => {
   assertEq(shouldRemindBackup({ lastBackupAt: 'not-a-date', now: Date.now(), hasData: true }), true);
+});
+test('backup.BACKUP_INTERVAL_MS is 6 days', () => {
+  assertEq(BACKUP_INTERVAL_MS, 6 * 24 * 60 * 60 * 1000);
 });
 test('backup.isEmptyCounts: empty / null → true; any count → false', () => {
   assertEq(isEmptyCounts(null), true);

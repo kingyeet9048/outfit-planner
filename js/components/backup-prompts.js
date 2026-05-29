@@ -1,7 +1,7 @@
 // Boot-time backup prompts:
 //   • If the database is empty (e.g. eviction wiped it, or a fresh install),
 //     offer to restore from a backup — once — with guidance on finding the file.
-//   • Otherwise, if it's been ≥24h since the last backup, nudge a one-tap backup.
+//   • Otherwise, if it's been ≥6 days since the last backup, nudge a one-tap backup.
 
 import { el, sheet, toast } from '../ui.js';
 import { isIOS } from '../storage.js';
@@ -105,7 +105,7 @@ async function doRestore(fn, close) {
   }
 }
 
-// ---------- 24h backup reminder ----------
+// ---------- Periodic backup reminder ----------
 
 async function maybePromptBackupReminder(counts) {
   const hasData = !isEmptyCounts(counts);
