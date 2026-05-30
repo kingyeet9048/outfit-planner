@@ -1,4 +1,5 @@
-import { el, renderTopbar, toast, confirm } from '../ui.js';
+import { el, renderTopbar, toast, confirm, backControl } from '../ui.js';
+import { back } from '../router.js';
 import { items as itemsStore } from '../store.js';
 import { resizeFile, urlFor, releaseOwner, hasBytes } from '../image.js';
 
@@ -18,7 +19,7 @@ export async function view({ id }) {
   const existing = isNew ? null : await itemsStore.get(id);
 
   if (!isNew && !existing) {
-    renderTopbar({ title: 'Not found', left: el('a', { class: 'icon-btn', href: '#/items' }, '◀') });
+    renderTopbar({ title: 'Not found', left: backControl('#/items') });
     return { node: el('div', { class: 'state' }, [el('h3', null, 'Item not found')]) };
   }
 
@@ -53,7 +54,7 @@ export async function view({ id }) {
       const ok = await confirm({ title: 'Discard changes?', message: 'You have unsaved changes.', confirmLabel: 'Discard', danger: true });
       if (!ok) return;
     }
-    location.hash = exitHash;
+    back(exitHash);
   }
 
   // ---- Form ----

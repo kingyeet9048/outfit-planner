@@ -2,7 +2,7 @@
 
 import { openDB } from '../js/vendor/idb.js';
 import { match, register } from '../js/router.js';
-import { el } from '../js/ui.js';
+import { el, backControl } from '../js/ui.js';
 import { parseIntent } from '../js/stylist/intent.js';
 import { buildItemContext, generateOutfits } from '../js/stylist/engine.js';
 import { rgbToHsv, colorTone, harmonyScore, classifyHarmony } from '../js/stylist/color.js';
@@ -110,6 +110,23 @@ test('router: strips trailing slash but preserves root', () => {
 test('router: no match for unknown', () => {
   const m = match('#/this-route-does-not-exist-xyz');
   assertTrue(!m, 'should not match');
+});
+
+test('router: match extracts the query string (filters travel with the route)', () => {
+  register('/items', () => null);
+  const m = match('#/items?filter=tops');
+  assertTrue(m && m.route, 'matched');
+  assertEq(m.search, 'filter=tops');
+  assertEq(new URLSearchParams(m.search).get('filter'), 'tops');
+});
+
+test('ui.backControl: renders a real <button> (history-aware), not a hardcoded link', () => {
+  // The navigation bug was hardcoded <a href> back buttons. The fix is a button
+  // that goes through the router's history-aware back(); assert it's a button.
+  const b = backControl('#/items');
+  assertEq(b.tagName, 'BUTTON');
+  assertEq(b.getAttribute('aria-label'), 'Back');
+  assertTrue(!b.getAttribute('href'), 'must not be an anchor with a fixed href');
 });
 
 test('daysBetween: inclusive range', () => {

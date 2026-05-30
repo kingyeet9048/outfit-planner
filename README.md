@@ -28,7 +28,7 @@ Open `index.html` directly via `file://` will NOT work — browsers block JavaSc
 
 Either script tries `python -m http.server`, then falls back to `npx serve`. Then open <http://127.0.0.1:5173/>.
 
-To run the test suite, open <http://127.0.0.1:5173/tests/test.html> — it runs automatically and reports pass/fail counts inline. There are 98 tests covering pure logic (UUID, routing, date helpers, blob ↔ base64 roundtrip, backup-reminder timing, empty-DB detection, retailer grouping, update-prompt logic), IndexedDB integration (CRUD, cascade deletes, shopping list, export/import, restore-from-file), and UI smoke tests (storage warning bar, install guide, backup/restore prompts, update banner).
+To run the test suite, open <http://127.0.0.1:5173/tests/test.html> — it runs automatically and reports pass/fail counts inline. There are 100 tests covering pure logic (UUID, routing + query parsing, date helpers, blob ↔ base64 roundtrip, backup-reminder timing, empty-DB detection, retailer grouping, update-prompt logic), IndexedDB integration (CRUD, cascade deletes, shopping list, export/import, restore-from-file), and UI smoke tests (storage warning bar, install guide, backup/restore prompts, update banner, history-aware back control).
 
 ## Deploying to GitHub Pages
 
@@ -90,6 +90,10 @@ Before declaring a release ready, walk through this on the device you actually u
 - [ ] **Export** → clear data → **Import** → all items/outfits/trips/days restored, images included
 - [ ] Add to Home Screen → kill network → relaunch → app shell loads
 - [ ] Settings shows storage estimate
+- [ ] Open an outfit → tap one of its items → press **Back**: returns to that **outfit** (not the items list)
+- [ ] Scroll down a long list → open an item → **Back**: list is restored to the same scroll position
+- [ ] Filter Items to **Tops** → open an item → **Back**: still filtered to Tops
+- [ ] Cold-open a deep link (e.g. paste an `#/item/…` URL in a new tab) → **Back** falls back to the logical parent list (doesn't leave the app)
 - [ ] Deploy a new version → within ~30 min (or on reopen) a **"new version available — Reload"** banner appears; tapping it reloads into the new version
 - [ ] **Settings → App → Check for updates** reports up-to-date or surfaces the Reload banner
 - [ ] **Settings → App → Force refresh** reloads the app and data (items/outfits/trips) is still intact
@@ -147,6 +151,7 @@ outfit-planner/
 - Top-down anatomical ordering (accessories → top → pant → shoes) is used consistently in the outfit editor, outfit cards, and trip-day rows.
 - Single accent color; content imagery carries visual richness.
 - Respects `prefers-color-scheme` (auto dark mode) and `prefers-reduced-motion`.
+- **History & navigation**: each history entry is tagged in `history.state` with a `{ navId, idx }`. Back/Forward restore the exact previous screen *and* its scroll position (`history.scrollRestoration = 'manual'`); Back buttons are history-aware (return to where you actually came from, with a logical-parent fallback for cold deep links). Filters live in the hash query string so they travel with the entry.
 - **Updates**: the service worker uses network-first for navigations and stale-while-revalidate for assets, and the app checks for a new version on launch, every 30 min, on resume, and on reconnect. When a new version is waiting it shows a one-tap **Reload** banner (skipWaiting + `controllerchange` reload). **Settings → App** also offers **Check for updates** and a **Force refresh** (clears Cache Storage — not IndexedDB — and reloads) for when an installed iOS PWA gets stuck on an old build.
 
 ## Troubleshooting
