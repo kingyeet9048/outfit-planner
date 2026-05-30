@@ -90,6 +90,7 @@ Before declaring a release ready, walk through this on the device you actually u
 - [ ] **Export** → clear data → **Import** → all items/outfits/trips/days restored, images included
 - [ ] Add to Home Screen → kill network → relaunch → app shell loads
 - [ ] Settings shows storage estimate
+- [ ] Installed to Home Screen on a notched iPhone: the top bar clears the camera/Dynamic Island — title + buttons sit in the grey bar below the inset, not jammed under the notch
 - [ ] Open an outfit → tap one of its items → press **Back**: returns to that **outfit** (not the items list)
 - [ ] Scroll down a long list → open an item → **Back**: list is restored to the same scroll position
 - [ ] Filter Items to **Tops** → open an item → **Back**: still filtered to Tops

@@ -69,7 +69,12 @@ html, body { background: var(--bg); color: var(--text); font-family: var(--font)
 .app-main { display: flex; flex-direction: column; min-height: 100dvh; min-width: 0; }
 .topbar {
   position: sticky; top: 0; z-index: 50;
-  height: var(--topbar-h);
+  /* Total height = bar (56px) + the notch/Dynamic-Island inset, which is added
+     as top padding. With box-sizing:border-box a FIXED height let the safe-area
+     padding eat the whole bar on iPhones, hiding the grey bar and shoving the
+     controls up under the camera. min-height keeps a full 56px of content room
+     below the inset. */
+  min-height: calc(var(--topbar-h) + env(safe-area-inset-top));
   padding: 0 16px;
   padding-top: env(safe-area-inset-top);
   display: flex; align-items: center; gap: 12px;
@@ -116,7 +121,7 @@ html, body { background: var(--bg); color: var(--text); font-family: var(--font)
 
 /* When the banner is showing, the sticky topbar sits directly below it and the
    banner owns the safe-area inset. */
-.has-storage-banner .topbar { top: var(--storage-banner-h, 0px); padding-top: 0; }
+.has-storage-banner .topbar { top: var(--storage-banner-h, 0px); padding-top: 0; min-height: var(--topbar-h); }
 
 /* ---------- Install / restore / backup sheets ---------- */
 .install-guide .guide-intro, .restore-prompt > p, .backup-reminder > p { margin-bottom: 12px; color: var(--text-muted); }
