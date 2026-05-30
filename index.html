@@ -12,7 +12,18 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
-  <script defer src="https://cloud.umami.is/script.js" data-website-id="90836ef6-43d9-42e5-a6f2-d65ed08623a4"></script>
+  <script>
+    (function () {
+      var localHosts = ['localhost', '127.0.0.1', '::1', '[::1]'];
+      if (location.protocol === 'file:' || localHosts.indexOf(location.hostname) !== -1) return;
+
+      var script = document.createElement('script');
+      script.defer = true;
+      script.src = 'https://cloud.umami.is/script.js';
+      script.dataset.websiteId = '90836ef6-43d9-42e5-a6f2-d65ed08623a4';
+      document.head.appendChild(script);
+    }());
+  </script>
   <link rel="stylesheet" href="css/reset.css">
   <link rel="stylesheet" href="css/app.css">
   <script>
