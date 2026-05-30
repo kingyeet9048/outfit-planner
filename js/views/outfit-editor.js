@@ -1,4 +1,5 @@
-import { el, renderTopbar, toast, confirm } from '../ui.js';
+import { el, renderTopbar, toast, confirm, backControl } from '../ui.js';
+import { back } from '../router.js';
 import { items as itemsStore, outfits as outfitsStore } from '../store.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
 import { pickItem } from '../components/picker.js';
@@ -12,7 +13,7 @@ export async function view({ id }) {
   const isNew = !id || id === 'new';
   const existing = isNew ? null : await outfitsStore.get(id);
   if (!isNew && !existing) {
-    renderTopbar({ title: 'Not found', left: el('a', { class: 'icon-btn', href: '#/outfits' }, '◀') });
+    renderTopbar({ title: 'Not found', left: backControl('#/outfits') });
     return { node: el('div', { class: 'state' }, [el('h3', null, 'Outfit not found')]) };
   }
 
@@ -42,7 +43,7 @@ export async function view({ id }) {
       const ok = await confirm({ title: 'Discard changes?', message: 'You have unsaved changes.', confirmLabel: 'Discard', danger: true });
       if (!ok) return;
     }
-    location.hash = exitHash;
+    back(exitHash);
   }
 
   const root = el('form', { class: 'outfit-editor', onSubmit: (e) => { e.preventDefault(); onSave(); } });

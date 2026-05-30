@@ -1,5 +1,7 @@
 // Small DOM helper and UI primitives: el(), modal/sheet, toast, confirm.
 
+import { back as routerBack } from './router.js';
+
 export function el(tag, attrs, children) {
   const node = document.createElement(tag);
   if (attrs) {
@@ -142,8 +144,18 @@ export function renderTopbar({ title, left, right }) {
   );
 }
 
+// History-aware back control. Returns to the exact previous in-app screen
+// (restoring its scroll); falls back to `fallback` for cold deep links.
+export function backControl(fallback = '#/', label = 'Back') {
+  return el('button', {
+    type: 'button', class: 'icon-btn', 'aria-label': label, title: label,
+    onClick: () => routerBack(fallback)
+  }, '◀');
+}
+
+// Legacy alias — now history-aware (the href is used only as the cold-start fallback).
 export function backButton(href = '#/') {
-  return el('a', { class: 'icon-btn', href, 'aria-label': 'Back' }, '◀');
+  return backControl(href);
 }
 
 export function iconLink(href, label, glyph) {

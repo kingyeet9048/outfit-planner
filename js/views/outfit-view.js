@@ -1,4 +1,4 @@
-import { el, renderTopbar, iconButton, toast, confirm, sheet } from '../ui.js';
+import { el, renderTopbar, iconButton, toast, confirm, sheet, backControl } from '../ui.js';
 import { items as itemsStore, outfits as outfitsStore } from '../store.js';
 import { renderStack, outfitRollup } from '../components/outfit-stack.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
@@ -22,7 +22,7 @@ export async function view({ id }) {
 
   const outfit = await outfitsStore.get(id);
   if (!outfit) {
-    renderTopbar({ title: 'Not found', left: el('a', { class: 'icon-btn', href: '#/outfits' }, '◀') });
+    renderTopbar({ title: 'Not found', left: backControl('#/outfits') });
     return { node: el('div', { class: 'state' }, [el('h3', null, 'Outfit not found')]) };
   }
 
@@ -33,7 +33,7 @@ export async function view({ id }) {
   const menuBtn = iconButton('More', '⋯', openMenu);
   renderTopbar({
     title: 'Outfit',
-    left: el('a', { class: 'icon-btn', href: '#/outfits', 'aria-label': 'Back' }, '◀'),
+    left: backControl('#/outfits'),
     right: menuBtn
   });
 

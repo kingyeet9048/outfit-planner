@@ -1,4 +1,5 @@
 import { el, renderTopbar, iconLink } from '../ui.js';
+import { replace } from '../router.js';
 import { items as itemsStore } from '../store.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
 
@@ -39,7 +40,9 @@ export async function view() {
       'aria-pressed': filter === c.value ? 'true' : 'false',
       onClick: () => {
         filter = c.value;
-        location.hash = `#/items?filter=${encodeURIComponent(filter)}`;
+        // Replace (not push) so toggling filters doesn't stack Back steps; the
+        // filter still lives in the URL, so it's restored when returning here.
+        replace(`#/items?filter=${encodeURIComponent(filter)}`);
       }
     }, c.label));
   });

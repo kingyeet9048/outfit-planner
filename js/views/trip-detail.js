@@ -1,4 +1,4 @@
-import { el, renderTopbar, toast, confirm, sheet } from '../ui.js';
+import { el, renderTopbar, toast, confirm, sheet, backControl } from '../ui.js';
 import { items as itemsStore, outfits as outfitsStore, trips as tripsStore, dayPlans, formatDateRange, formatDayLabel, daysBetween, tripShoppingList, groupShoppingByRetailer } from '../store.js';
 import { renderStack, outfitRollup } from '../components/outfit-stack.js';
 import { pickOutfit } from '../components/picker.js';
@@ -19,7 +19,7 @@ export async function view({ id }) {
   releaseOwner(OWNER);
   const trip = await tripsStore.get(id);
   if (!trip) {
-    renderTopbar({ title: 'Trip', left: el('a', { class: 'icon-btn', href: '#/trips' }, '◀') });
+    renderTopbar({ title: 'Trip', left: backControl('#/trips') });
     return { node: el('div', { class: 'state' }, [el('h3', null, 'Trip not found')]) };
   }
 
@@ -46,7 +46,7 @@ export async function view({ id }) {
 
   // Top bar
   const editBtn = el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Trip menu', onClick: openTripMenu }, '⋯');
-  renderTopbar({ title: trip.name || 'Trip', left: el('a', { class: 'icon-btn', href: '#/trips' }, '◀'), right: editBtn });
+  renderTopbar({ title: trip.name || 'Trip', left: backControl('#/trips'), right: editBtn });
 
   function renderHeader(data) {
     const dates = daysBetween(trip.startDate, trip.endDate);
@@ -250,7 +250,7 @@ export async function view({ id }) {
             trip.name = state.name.trim();
             trip.startDate = state.startDate;
             trip.endDate = state.endDate;
-            renderTopbar({ title: trip.name, left: el('a', { class: 'icon-btn', href: '#/trips' }, '◀'), right: editBtn });
+            renderTopbar({ title: trip.name, left: backControl('#/trips'), right: editBtn });
             await renderAll();
           }
         }, [
