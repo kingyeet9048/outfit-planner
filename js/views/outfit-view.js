@@ -138,6 +138,26 @@ export async function view({ id }) {
           onClick: async () => {
             close();
             try {
+              const copy = await outfitsStore.duplicate(outfit.id);
+              toast('Outfit duplicated', { kind: 'success' });
+              location.hash = `#/outfit/${copy.id}/edit`;
+            } catch (err) {
+              toast('Duplicate failed: ' + err.message, { kind: 'danger' });
+            }
+          }
+        }, [
+          el('div', { class: 'thumb' }, '⧉'),
+          el('div', { class: 'row-body' }, [
+            el('div', { class: 'row-title' }, 'Duplicate outfit'),
+            el('div', { class: 'row-sub' }, 'Make a copy that reuses these items')
+          ])
+        ]),
+        el('button', {
+          type: 'button',
+          class: 'list-row',
+          onClick: async () => {
+            close();
+            try {
               const result = await shareOutfits([outfit], itemsById);
               if (result.method === 'download') toast('Outfit image downloaded');
             } catch (err) {
