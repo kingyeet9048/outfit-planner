@@ -1,4 +1,7 @@
 import { getDb } from './db.js';
+import { normalizeTags } from './search.js';
+import { normalizePackingState } from './packing.js';
+import { dedupeIds } from './reuse.js';
 
 export const SCHEMA_VERSION = 1;
 
@@ -21,6 +24,42 @@ export async function base64ToBlob({ mime, base64 }) {
   return await res.blob();
 }
 
+async function cloneBlob(blob) {
+  if (!blob) return null;
+  const buffer = await blob.arrayBuffer();
+  return new Blob([buffer], { type: blob.type || 'image/jpeg' });
+}
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj || {}, key);
+}
+
+function dayPlanId(plan) {
+  return plan?.tripId && plan?.date ? `${plan.tripId}_${plan.date}` : (plan?.id || `${plan?.tripId}_${plan?.date}`);
+}
+
+function outfitIdsFromDayPlan(plan, existing) {
+  if (Array.isArray(plan?.outfitIds)) return dedupeIds(plan.outfitIds);
+  if (hasOwn(plan, 'outfitId')) return dedupeIds(plan.outfitId ? [plan.outfitId] : []);
+  if (existing) {
+    const existingIds = Array.isArray(existing.outfitIds)
+      ? existing.outfitIds
+      : (existing.outfitId ? [existing.outfitId] : []);
+    return dedupeIds(existingIds);
+  }
+  return [];
+}
+
+function normalizeDayPlanRecord(plan, existing = null) {
+  return {
+    id: dayPlanId(plan),
+    tripId: plan.tripId,
+    date: plan.date,
+    outfitIds: outfitIdsFromDayPlan(plan, existing),
+    notes: hasOwn(plan, 'notes') ? (plan.notes || '') : (existing ? (existing.notes || '') : '')
+  };
+}
+
 export async function buildExport() {
   const db = await getDb();
   const [rawItems, outfitsList, tripsList, daysList] = await Promise.all([
@@ -39,6 +78,7 @@ export async function buildExport() {
       subcategory: it.subcategory,
       description: it.description,
       purchaseUrl: it.purchaseUrl,
+      tags: normalizeTags(it.tags),
       image,
       owned: !!it.owned,
       createdAt: it.createdAt,
@@ -50,8 +90,8 @@ export async function buildExport() {
     exportedAt: new Date().toISOString(),
     items,
     outfits: outfitsList,
-    trips: tripsList,
-    dayPlans: daysList
+    trips: tripsList.map(t => ({ ...t, packing: normalizePackingState(t.packing) })),
+    dayPlans: daysList.map(d => normalizeDayPlanRecord(d))
   };
 }
 
@@ -81,28 +121,80 @@ export async function importFromObject(data, { mode = 'replace' } = {}) {
   if (data.schemaVersion !== SCHEMA_VERSION) throw new Error(`Unsupported schema version: ${data.schemaVersion}`);
 
   const nowIso = new Date().toISOString();
+  const mergeMode = mode === 'merge';
+  const db = await getDb();
 
   // Pre-resolve image blobs BEFORE starting the transaction —
   // IndexedDB transactions auto-close on the next microtask after the last
   // pending request resolves, so awaiting fetch() inside the tx breaks it.
   const itemRecords = [];
   for (const raw of (data.items || [])) {
-    const imageBlob = raw.image ? await base64ToBlob(raw.image) : null;
+    const existing = mergeMode && raw.id ? await db.get('items', raw.id) : null;
+    const imageBlob = hasOwn(raw, 'image')
+      ? (raw.image ? await base64ToBlob(raw.image) : null)
+      : (existing ? await cloneBlob(existing.imageBlob) : null);
+    const rawOwned = hasOwn(raw, 'owned') ? raw.owned : (existing ? existing.owned : 0);
     itemRecords.push({
       id: raw.id,
-      name: raw.name || '',
-      category: raw.category || 'top',
-      subcategory: raw.subcategory || '',
-      description: raw.description || '',
-      purchaseUrl: raw.purchaseUrl || '',
+      name: hasOwn(raw, 'name') ? (raw.name || '') : (existing ? (existing.name || '') : ''),
+      category: hasOwn(raw, 'category') ? (raw.category || 'top') : (existing ? (existing.category || 'top') : 'top'),
+      subcategory: hasOwn(raw, 'subcategory') ? (raw.subcategory || '') : (existing ? (existing.subcategory || '') : ''),
+      description: hasOwn(raw, 'description') ? (raw.description || '') : (existing ? (existing.description || '') : ''),
+      purchaseUrl: hasOwn(raw, 'purchaseUrl') ? (raw.purchaseUrl || '') : (existing ? (existing.purchaseUrl || '') : ''),
+      tags: hasOwn(raw, 'tags') ? normalizeTags(raw.tags) : (existing ? normalizeTags(existing.tags) : []),
       imageBlob,
-      owned: raw.owned ? 1 : 0,
-      createdAt: raw.createdAt || nowIso,
-      updatedAt: raw.updatedAt || raw.createdAt || nowIso
+      owned: rawOwned ? 1 : 0,
+      createdAt: raw.createdAt || (existing && existing.createdAt) || nowIso,
+      updatedAt: raw.updatedAt || (existing && existing.updatedAt) || raw.createdAt || nowIso
     });
   }
 
-  const db = await getDb();
+  const outfitRecords = [];
+  for (const o of (data.outfits || [])) {
+    const existing = mergeMode && o.id ? await db.get('outfits', o.id) : null;
+    outfitRecords.push({
+      id: o.id,
+      name: hasOwn(o, 'name') ? (o.name || '') : (existing ? (existing.name || '') : ''),
+      topId: hasOwn(o, 'topId') ? (o.topId ?? null) : (existing ? (existing.topId ?? null) : null),
+      pantId: hasOwn(o, 'pantId') ? (o.pantId ?? null) : (existing ? (existing.pantId ?? null) : null),
+      shoesId: hasOwn(o, 'shoesId') ? (o.shoesId ?? null) : (existing ? (existing.shoesId ?? null) : null),
+      accessoryIds: hasOwn(o, 'accessoryIds') && Array.isArray(o.accessoryIds)
+        ? o.accessoryIds
+        : (existing && Array.isArray(existing.accessoryIds) ? existing.accessoryIds : []),
+      otherIds: hasOwn(o, 'otherIds') && Array.isArray(o.otherIds)
+        ? o.otherIds
+        : (existing && Array.isArray(existing.otherIds) ? existing.otherIds : []),
+      notes: hasOwn(o, 'notes') ? (o.notes || '') : (existing ? (existing.notes || '') : ''),
+      aiGenerated: hasOwn(o, 'aiGenerated') ? !!o.aiGenerated : !!(existing && existing.aiGenerated),
+      aiPrompt: hasOwn(o, 'aiPrompt') ? (o.aiPrompt || '') : (existing ? (existing.aiPrompt || '') : ''),
+      aiRationale: hasOwn(o, 'aiRationale') ? (o.aiRationale || '') : (existing ? (existing.aiRationale || '') : ''),
+      createdAt: o.createdAt || (existing && existing.createdAt) || nowIso,
+      updatedAt: o.updatedAt || (existing && existing.updatedAt) || o.createdAt || nowIso
+    });
+  }
+
+  const tripRecords = [];
+  for (const t of (data.trips || [])) {
+    const existing = mergeMode && t.id ? await db.get('trips', t.id) : null;
+    tripRecords.push({
+      id: t.id,
+      name: hasOwn(t, 'name') ? (t.name || '') : (existing ? (existing.name || '') : ''),
+      startDate: hasOwn(t, 'startDate') ? (t.startDate || '') : (existing ? (existing.startDate || '') : ''),
+      endDate: hasOwn(t, 'endDate') ? (t.endDate || '') : (existing ? (existing.endDate || '') : ''),
+      notes: hasOwn(t, 'notes') ? (t.notes || '') : (existing ? (existing.notes || '') : ''),
+      packing: hasOwn(t, 'packing') ? normalizePackingState(t.packing) : (existing ? normalizePackingState(existing.packing) : normalizePackingState()),
+      createdAt: t.createdAt || (existing && existing.createdAt) || nowIso,
+      updatedAt: t.updatedAt || (existing && existing.updatedAt) || t.createdAt || nowIso
+    });
+  }
+
+  const dayPlanRecords = [];
+  for (const d of (data.dayPlans || [])) {
+    const canonicalId = dayPlanId(d);
+    const existing = mergeMode && canonicalId ? await db.get('dayPlans', canonicalId) : null;
+    dayPlanRecords.push(normalizeDayPlanRecord({ ...d, id: canonicalId }, existing));
+  }
+
   const tx = db.transaction(['items', 'outfits', 'trips', 'dayPlans'], 'readwrite');
   const sItems = tx.objectStore('items');
   const sOutfits = tx.objectStore('outfits');
@@ -116,47 +208,9 @@ export async function importFromObject(data, { mode = 'replace' } = {}) {
     sDays.clear();
   }
   for (const rec of itemRecords) sItems.put(rec);
-  for (const o of (data.outfits || [])) {
-    sOutfits.put({
-      id: o.id,
-      name: o.name || '',
-      topId: o.topId ?? null,
-      pantId: o.pantId ?? null,
-      shoesId: o.shoesId ?? null,
-      accessoryIds: Array.isArray(o.accessoryIds) ? o.accessoryIds : [],
-      otherIds: Array.isArray(o.otherIds) ? o.otherIds : [],
-      notes: o.notes || '',
-      aiGenerated: !!o.aiGenerated,
-      aiPrompt: o.aiPrompt || '',
-      aiRationale: o.aiRationale || '',
-      createdAt: o.createdAt || nowIso,
-      updatedAt: o.updatedAt || o.createdAt || nowIso
-    });
-  }
-  for (const t of (data.trips || [])) {
-    sTrips.put({
-      id: t.id,
-      name: t.name || '',
-      startDate: t.startDate || '',
-      endDate: t.endDate || '',
-      notes: t.notes || '',
-      createdAt: t.createdAt || nowIso,
-      updatedAt: t.updatedAt || t.createdAt || nowIso
-    });
-  }
-  for (const d of (data.dayPlans || [])) {
-    // Backward-compat: convert legacy `outfitId` to `outfitIds[]`
-    const outfitIds = Array.isArray(d.outfitIds)
-      ? d.outfitIds.filter(Boolean)
-      : (d.outfitId ? [d.outfitId] : []);
-    sDays.put({
-      id: d.id || `${d.tripId}_${d.date}`,
-      tripId: d.tripId,
-      date: d.date,
-      outfitIds,
-      notes: d.notes || ''
-    });
-  }
+  for (const o of outfitRecords) sOutfits.put(o);
+  for (const t of tripRecords) sTrips.put(t);
+  for (const d of dayPlanRecords) sDays.put(d);
   await tx.done;
   return {
     items: (data.items || []).length,

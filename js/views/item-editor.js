@@ -2,6 +2,7 @@ import { el, renderTopbar, toast, confirm, backControl } from '../ui.js';
 import { back } from '../router.js';
 import { items as itemsStore } from '../store.js';
 import { resizeFile, urlFor, releaseOwner, hasBytes } from '../image.js';
+import { normalizeTags } from '../search.js';
 
 const CATEGORIES = [
   { value: 'top', label: 'Top' },
@@ -29,6 +30,7 @@ export async function view({ id }) {
     subcategory: existing?.subcategory || '',
     description: existing?.description || '',
     purchaseUrl: existing?.purchaseUrl || '',
+    tagsText: normalizeTags(existing?.tags).join(', '),
     owned: existing ? !!existing.owned : true,
     imageBlob: existing?.imageBlob || null,
     // True only when the user actually replaced the photo in this session.
@@ -161,6 +163,14 @@ export async function view({ id }) {
   });
   root.appendChild(toggle);
 
+  // Tags
+  root.appendChild(field('Tags (optional)', el('input', {
+    type: 'text',
+    value: state.tagsText,
+    placeholder: 'linen, beach, dinner',
+    onInput: (e) => { state.tagsText = e.target.value; state.dirty = true; }
+  })));
+
   // Description
   root.appendChild(field('Description (optional)', el('textarea', {
     value: state.description, rows: 3, placeholder: 'Color, brand, notes…',
@@ -210,6 +220,7 @@ export async function view({ id }) {
         subcategory: state.subcategory.trim(),
         description: state.description.trim(),
         purchaseUrl: state.purchaseUrl.trim(),
+        tags: normalizeTags(state.tagsText),
         owned: state.owned
       };
       // Only pass imageBlob when the user touched it. items.put() falls back to

@@ -1,6 +1,7 @@
 import { el, renderTopbar, iconButton, toast, confirm, sheet, backControl } from '../ui.js';
 import { items as itemsStore, outfits as outfitsStore } from '../store.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
+import { normalizeTags } from '../search.js';
 
 const CATEGORY_LABELS = { top: 'Top', pant: 'Pant', shoes: 'Shoes', accessory: 'Accessory', other: 'Other' };
 const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨', other: '🎒' };
@@ -45,6 +46,13 @@ export async function view({ id }) {
     ].join('')),
     el('span', { class: `badge ${item.owned ? 'badge-success' : 'badge-warn'}` }, item.owned ? '✓ Owned' : '$ To buy')
   ]));
+
+  const tags = normalizeTags(item.tags);
+  if (tags.length) {
+    root.appendChild(el('div', { class: 'detail-tags' }, tags.map(tag =>
+      el('a', { class: 'badge tag-link', href: `#/items?tag=${encodeURIComponent(tag)}` }, `#${tag}`)
+    )));
+  }
 
   // Description
   if (item.description && item.description.trim()) {
