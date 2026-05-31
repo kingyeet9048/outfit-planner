@@ -12,7 +12,7 @@
 //     take over by posting { type: 'SKIP_WAITING' }.
 //
 // Bump CACHE_NAME on any shell change.
-const CACHE_NAME = 'outfit-planner-v18';
+const CACHE_NAME = 'outfit-planner-v19';
 const PRECACHE = [
   './',
   './index.html',

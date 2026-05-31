@@ -1793,6 +1793,26 @@ test('UI: trip packing view renders pack/to-buy sections and persists checklist 
   }
 });
 
+test('UI: trip packing view omits optional to-buy section without rendering null text', async () => {
+  ensureUiRoots();
+  await withTestDb();
+  const owned = await items.put({ name: 'Tank undershirt', category: 'other', subcategory: 'undershirt', owned: true });
+  const outfit = await outfits.put({ name: 'Base layer', otherIds: [owned.id] });
+  const trip = await trips.put({ name: 'No buys trip', startDate: '2026-07-17', endDate: '2026-07-17' });
+  await dayPlans.setOutfits(trip.id, '2026-07-17', [outfit.id]);
+
+  const { view: packingView } = await import('../js/views/trip-packing.js');
+  const result = await packingView({ id: trip.id });
+  try {
+    const text = result.node.textContent || '';
+    assertTrue(/Tank undershirt/.test(text), 'owned item appears in pack list');
+    assertTrue(!/\bnull\b/.test(text), 'no native null text node is rendered');
+    assertTrue(!/To buy/.test(text), 'empty to-buy section is omitted');
+  } finally {
+    if (result.cleanup) result.cleanup();
+  }
+});
+
 test('UI: storage banner reflects protection state (shown + tappable when unprotected)', async () => {
   ensureUiRoots();
   const { main, banner } = setupShellDom();
