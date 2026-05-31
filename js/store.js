@@ -1,4 +1,7 @@
 import { getDb, uuid } from './db.js';
+import { dedupeIds, nextCopyName } from './reuse.js';
+import { normalizeTags } from './search.js';
+import { normalizePackingState } from './packing.js';
 
 const nowIso = () => new Date().toISOString();
 
@@ -50,9 +53,12 @@ export const items = {
       subcategory: input.subcategory || '',
       description: input.description || '',
       purchaseUrl: input.purchaseUrl || '',
+      tags: 'tags' in input ? normalizeTags(input.tags) : normalizeTags(existing?.tags),
       imageBlob,
       // Store as 0/1 so it can be indexed (IDB indices don't support boolean)
-      owned: input.owned === false || input.owned === 0 ? 0 : 1,
+      owned: 'owned' in input
+        ? (input.owned === false || input.owned === 0 ? 0 : 1)
+        : (existing ? (existing.owned ? 1 : 0) : 1),
       createdAt: existing ? existing.createdAt : (input.createdAt || nowIso()),
       updatedAt: nowIso()
     };
@@ -132,6 +138,24 @@ export const outfits = {
     await db.put('outfits', outfit);
     return outfit;
   },
+  async duplicate(id, overrides = {}) {
+    const db = await getDb();
+    const source = await db.get('outfits', id);
+    if (!source) throw new Error('Outfit not found');
+    const all = await db.getAll('outfits');
+    return outfits.put({
+      name: overrides.name || nextCopyName(source.name || 'Untitled outfit', all.map(o => o.name)),
+      topId: source.topId ?? null,
+      pantId: source.pantId ?? null,
+      shoesId: source.shoesId ?? null,
+      accessoryIds: Array.isArray(source.accessoryIds) ? source.accessoryIds.slice() : [],
+      otherIds: Array.isArray(source.otherIds) ? source.otherIds.slice() : [],
+      notes: source.notes || '',
+      aiGenerated: !!source.aiGenerated,
+      aiPrompt: source.aiPrompt || '',
+      aiRationale: source.aiRationale || ''
+    });
+  },
   async remove(id) {
     const db = await getDb();
     const tx = db.transaction(['outfits', 'dayPlans'], 'readwrite');
@@ -164,30 +188,46 @@ export const trips = {
   async all() {
     const db = await getDb();
     const list = await db.getAll('trips');
+    list.forEach(t => { t.packing = normalizePackingState(t.packing); });
     return list.sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
   },
   async get(id) {
     const db = await getDb();
-    return db.get('trips', id);
+    const trip = await db.get('trips', id);
+    if (trip) trip.packing = normalizePackingState(trip.packing);
+    return trip;
   },
   async put(input) {
     const db = await getDb();
     const id = input.id || uuid();
     const existing = input.id ? await db.get('trips', input.id) : null;
-    if (input.startDate && input.endDate && input.endDate < input.startDate) {
+    const nextName = 'name' in input ? (input.name || 'Untitled trip') : (existing ? (existing.name || 'Untitled trip') : 'Untitled trip');
+    const nextStartDate = 'startDate' in input ? (input.startDate || '') : (existing ? (existing.startDate || '') : '');
+    const nextEndDate = 'endDate' in input ? (input.endDate || '') : (existing ? (existing.endDate || '') : '');
+    if (nextStartDate && nextEndDate && nextEndDate < nextStartDate) {
       throw new Error('End date must be on or after start date');
     }
     const trip = {
       id,
-      name: input.name || 'Untitled trip',
-      startDate: input.startDate || '',
-      endDate: input.endDate || '',
-      notes: input.notes || '',
+      name: nextName,
+      startDate: nextStartDate,
+      endDate: nextEndDate,
+      notes: 'notes' in input ? (input.notes || '') : (existing ? (existing.notes || '') : ''),
+      packing: normalizePackingState('packing' in input ? input.packing : (existing && existing.packing)),
       createdAt: existing ? existing.createdAt : (input.createdAt || nowIso()),
       updatedAt: nowIso()
     };
     await db.put('trips', trip);
     return trip;
+  },
+  async setPacking(id, packing) {
+    const db = await getDb();
+    const trip = await db.get('trips', id);
+    if (!trip) return null;
+    trip.packing = normalizePackingState(packing);
+    trip.updatedAt = nowIso();
+    await db.put('trips', trip);
+    return trip.packing;
   },
   async remove(id) {
     const db = await getDb();
@@ -206,9 +246,10 @@ export const trips = {
 // Schema note: pre-v1.0.1 used a singular `outfitId`. We migrate on read.
 function normalizeDayPlan(dp) {
   if (!dp) return dp;
-  if (!Array.isArray(dp.outfitIds)) {
-    dp.outfitIds = dp.outfitId ? [dp.outfitId] : [];
-  }
+  const outfitIds = Array.isArray(dp.outfitIds)
+    ? dp.outfitIds
+    : (dp.outfitId ? [dp.outfitId] : []);
+  dp.outfitIds = dedupeIds(outfitIds);
   // outfitId is no longer authoritative; drop it for serialization simplicity
   delete dp.outfitId;
   return dp;
@@ -230,7 +271,7 @@ export const dayPlans = {
     const existing = normalizeDayPlan(await db.get('dayPlans', id));
     const dp = {
       id, tripId, date,
-      outfitIds: Array.isArray(outfitIds) ? outfitIds.filter(Boolean) : [],
+      outfitIds: Array.isArray(outfitIds) ? dedupeIds(outfitIds) : [],
       notes: notes != null ? notes : (existing ? existing.notes : '')
     };
     if (dp.outfitIds.length === 0 && !dp.notes) {

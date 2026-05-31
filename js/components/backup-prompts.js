@@ -4,6 +4,7 @@
 //   • Otherwise, if it's been ≥6 days since the last backup, nudge a one-tap backup.
 
 import { el, sheet, toast } from '../ui.js';
+import { resolve as rerenderRoute } from '../router.js';
 import { isIOS } from '../storage.js';
 import {
   isDatabaseEmpty, getLastBackupAt, getCounts, isEmptyCounts, shouldRemindBackup,
@@ -30,13 +31,18 @@ export async function runBackupPrompts() {
 async function maybePromptRestore() {
   // "Ask one time": skip if the user already chose to start fresh, or we've
   // already shown it this session.
-  let startedFresh = false, shownThisSession = false;
-  try { startedFresh = localStorage.getItem(STARTED_FRESH_KEY) === '1'; } catch {}
-  try { shownThisSession = sessionStorage.getItem(RESTORE_SHOWN_SESSION) === '1'; } catch {}
-  if (startedFresh || shownThisSession) return;
+  if (!shouldOfferRestorePromptForCounts({ items: 0, outfits: 0, trips: 0, dayPlans: 0 })) return;
   try { sessionStorage.setItem(RESTORE_SHOWN_SESSION, '1'); } catch {}
 
   await showRestorePrompt();
+}
+
+export function shouldOfferRestorePromptForCounts(counts) {
+  if (!isEmptyCounts(counts)) return false;
+  let startedFresh = false, shownThisSession = false;
+  try { startedFresh = localStorage.getItem(STARTED_FRESH_KEY) === '1'; } catch {}
+  try { shownThisSession = sessionStorage.getItem(RESTORE_SHOWN_SESSION) === '1'; } catch {}
+  return !startedFresh && !shownThisSession;
 }
 
 export async function showRestorePrompt() {
@@ -79,7 +85,11 @@ export async function showRestorePrompt() {
         ]),
         el('button', {
           type: 'button', class: 'btn btn-ghost btn-block',
-          onClick: () => { try { localStorage.setItem(STARTED_FRESH_KEY, '1'); } catch {} close(); }
+          onClick: () => {
+            try { localStorage.setItem(STARTED_FRESH_KEY, '1'); } catch {}
+            close();
+            setTimeout(() => { rerenderRoute(); }, 50);
+          }
         }, 'Start fresh')
       ]);
     }
@@ -96,7 +106,7 @@ async function doRestore(fn, close) {
       toast(`Restored ${c.items || 0} items, ${c.outfits || 0} outfits, ${c.trips || 0} trips`, { kind: 'success' });
       close();
       // Re-render the current view so restored data appears immediately.
-      setTimeout(() => { window.dispatchEvent(new HashChangeEvent('hashchange')); }, 50);
+      setTimeout(() => { rerenderRoute(); }, 50);
     } else if (res && res.reason === 'permission') {
       toast('Permission needed to read the backup file', { kind: 'danger' });
     }

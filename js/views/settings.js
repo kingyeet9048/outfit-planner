@@ -8,12 +8,23 @@ import {
 } from '../backup.js';
 import { openInstallGuide } from '../components/storage-banner.js';
 import { checkForUpdates, forceRefresh } from '../update.js';
+import {
+  dismissSetup, isSetupDismissed, loadSetupStatus,
+  renderSetupSettingsRow, resetSetupDismissal
+} from '../setup.js';
 
 const LAST_EXPORT_KEY = 'outfit-planner:lastExportedAt';
 
 export async function view() {
   renderTopbar({ title: 'Settings' });
   const root = el('div', { class: 'settings-view' });
+
+  // --- Setup guide ---
+  const setupGroup = el('div', { class: 'settings-group' }, [el('h3', null, 'Setup')]);
+  const setupCard = el('div', { class: 'settings-card' });
+  setupGroup.appendChild(setupCard);
+  root.appendChild(setupGroup);
+  renderSetupCard(setupCard);
 
   // --- Data group ---
   const lastExport = localStorage.getItem(LAST_EXPORT_KEY);
@@ -60,6 +71,22 @@ export async function view() {
   loadProtectionStatus(protectionTarget);
   loadStorageEstimate(usageTarget);
 
+  async function renderSetupCard(card) {
+    const status = await loadSetupStatus().catch(() => null);
+    card.replaceChildren(renderSetupSettingsRow(status, {
+      onToggleDismissal: () => {
+        if (isSetupDismissed()) {
+          resetSetupDismissal();
+          toast('Setup guide shown on Trips');
+        } else {
+          dismissSetup();
+          toast('Setup guide hidden');
+        }
+        renderSetupCard(card);
+      }
+    }));
+  }
+
   async function renderBackupCard(card) {
     const last = getLastBackupAt();
     const rows = [
@@ -70,7 +97,7 @@ export async function view() {
       }),
       settingsRow({
         label: 'Backup destination',
-        sub: `Saves a single file to ${destinationLabel()} — overwritten each time, so backups never pile up.`,
+        sub: `Saves to ${destinationLabel()}. One stable filename keeps backups from piling up.`,
         control: null
       })
     ];

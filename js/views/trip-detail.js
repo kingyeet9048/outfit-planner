@@ -3,6 +3,10 @@ import { items as itemsStore, outfits as outfitsStore, trips as tripsStore, dayP
 import { renderStack, outfitRollup } from '../components/outfit-stack.js';
 import { pickOutfit } from '../components/picker.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
+import { buildOutfitReuseSummary, formatDateShort, mergeOutfitIds, reuseSummaryCopy, reuseSummaryShortText } from '../reuse.js';
+import { deriveTripPacking } from '../packing.js';
+
+const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨', other: '🎒' };
 
 // Deterministic, recognizable color for a store avatar (same store → same hue
 // across renders). Mid-tone lightness so white text stays legible in both themes.
@@ -12,6 +16,10 @@ function storeColor(seed) {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
   // Lower lightness keeps the white monogram legible across all hues.
   return `hsl(${h}, 55%, 36%)`;
+}
+
+function itemIcon(item) {
+  return CATEGORY_ICONS[item?.category] || '👕';
 }
 
 export async function view({ id }) {
@@ -40,6 +48,7 @@ export async function view({ id }) {
     const data = await refresh();
     root.replaceChildren();
     root.appendChild(renderHeader(data));
+    root.appendChild(renderPackingCta(data));
     root.appendChild(renderShoppingList(data));
     root.appendChild(renderDays(data));
   };
@@ -57,13 +66,39 @@ export async function view({ id }) {
     ]);
   }
 
+  function renderPackingCta(data) {
+    const summary = deriveTripPacking({
+      plans: [...data.planByDate.values()],
+      outfitsById: data.outfitsById,
+      itemsById: data.itemsById,
+      packing: trip.packing
+    });
+    const sub = summary.totalCount
+      ? `${summary.checkedCount}/${summary.totalCount} packed`
+      : (summary.toBuyItems.length ? `${summary.toBuyItems.length} to buy before packing` : 'Build from assigned outfits');
+    return el('a', { class: 'list-row trip-packing-cta', href: `#/trip/${id}/packing` }, [
+      el('div', { class: 'thumb' }, '✓'),
+      el('div', { class: 'row-body' }, [
+        el('div', { class: 'row-title' }, 'Packing checklist'),
+        el('div', { class: 'row-sub' }, sub)
+      ]),
+      el('span', { class: 'row-chevron' }, '›')
+    ]);
+  }
+
   function renderShoppingList(data) {
     const { shopping } = data;
     if (shopping.length === 0) {
-      return el('div', { class: 'shopping-list' }, [
-        el('summary', { style: { listStyle: 'none', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '600' } }, [
-          el('span', null, '🎉'),
-          el('span', null, "You're all set — everything is owned")
+      const plannedOutfitCount = [...data.planByDate.values()].reduce((sum, plan) => sum + ((plan.outfitIds || []).length), 0);
+      return el('div', { class: 'shopping-list shopping-list-empty' }, [
+        el('div', { class: 'shopping-empty-row' }, [
+          el('div', { class: 'thumb shopping-empty-icon' }, plannedOutfitCount ? '✓' : '🛒'),
+          el('div', { class: 'row-body' }, [
+            el('div', { class: 'row-title' }, plannedOutfitCount ? 'Everything assigned is owned' : 'No shopping yet'),
+            el('div', { class: 'row-sub' }, plannedOutfitCount
+              ? 'To-buy items from planned outfits will appear here.'
+              : 'Choose outfits for trip days to build the list.')
+          ])
         ])
       ]);
     }
@@ -105,7 +140,7 @@ export async function view({ id }) {
   // A single shopping-list row. Shared by the grouped and flat layouts.
   function renderShoppingItem(it) {
     return el('div', { class: 'shopping-item' }, [
-      el('div', { class: 'thumb' }, hasBytes(it.imageBlob) ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: '' }) : el('span', null, '👕')),
+      el('div', { class: 'thumb' }, hasBytes(it.imageBlob) ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: '' }) : el('span', { 'aria-hidden': 'true' }, itemIcon(it))),
       el('div', { class: 'si-body' }, [
         el('div', { class: 'si-name' }, it.name || '(unnamed)'),
         el('div', { class: 'si-cat' }, [
@@ -136,28 +171,45 @@ export async function view({ id }) {
       const outfitIds = (plan && plan.outfitIds) || [];
       const label = formatDayLabel(dateIso);
       const section = el('div', { class: 'day-section' });
-      section.appendChild(el('div', { class: 'day-header' }, `${label.weekday} ${label.short}`));
+      section.appendChild(el('div', { class: 'day-header' }, [
+        el('span', null, `${label.weekday} ${label.short}`),
+        el('button', {
+          type: 'button',
+          class: 'day-menu-btn',
+          'aria-label': `${label.weekday} ${label.short} actions`,
+          onClick: () => openDayActions(dateIso, data)
+        }, '⋯')
+      ]));
 
       if (outfitIds.length === 0) {
         section.appendChild(el('button', {
           type: 'button',
           class: 'day-row empty',
-          onClick: () => addOutfitToDay(dateIso)
+          onClick: () => addOutfitToDay(dateIso, data)
         }, '+ Choose outfit'));
       } else {
         outfitIds.forEach((oid, idx) => {
           const outfit = data.outfitsById.get(oid);
           if (!outfit) return;
           const rollup = outfitRollup({ outfit, itemsById: data.itemsById });
+          const reuseSummary = buildOutfitReuseSummary({
+            outfit,
+            date: dateIso,
+            planByDate: data.planByDate,
+            outfitsById: data.outfitsById,
+            itemsById: data.itemsById
+          });
+          const reuseText = reuseSummaryShortText(reuseSummary);
           section.appendChild(el('button', {
             type: 'button',
             class: 'day-row',
-            onClick: () => replaceOutfitOnDay(dateIso, idx, oid)
+            onClick: () => openOutfitDayActions(dateIso, idx, oid, data)
           }, [
             renderStack({ outfit, itemsById: data.itemsById, size: 'sm', ownerKey: OWNER }),
             el('div', { class: 'day-body' }, [
               el('div', { class: 'day-title' }, outfit.name || 'Untitled'),
-              el('div', { class: 'day-sub' }, `${rollup.total} item${rollup.total === 1 ? '' : 's'} · ${rollup.owned} owned${rollup.toBuy ? ` · ${rollup.toBuy} to buy` : ''}`)
+              el('div', { class: 'day-sub' }, `${rollup.total} item${rollup.total === 1 ? '' : 's'} · ${rollup.owned} owned${rollup.toBuy ? ` · ${rollup.toBuy} to buy` : ''}`),
+              reuseText ? el('div', { class: `reuse-inline ${reuseSummary.level === 'strong' ? 'reuse-inline-strong' : 'reuse-inline-soft'}` }, reuseText) : null
             ]),
             el('span', { class: 'row-chevron' }, '›')
           ]));
@@ -167,7 +219,7 @@ export async function view({ id }) {
           type: 'button',
           class: 'day-row empty add-another',
           style: { padding: '12px', fontSize: '14px' },
-          onClick: () => addOutfitToDay(dateIso)
+          onClick: () => addOutfitToDay(dateIso, data)
         }, '+ Add another outfit'));
       }
       wrap.appendChild(section);
@@ -175,18 +227,49 @@ export async function view({ id }) {
     return wrap;
   }
 
+  function pickerReuseContext(dateIso, data, currentId = null) {
+    return {
+      date: dateIso,
+      planByDate: data.planByDate,
+      outfitsById: data.outfitsById,
+      itemsById: data.itemsById,
+      currentId,
+      preventTargetDuplicates: true
+    };
+  }
+
+  function targetOutfitIds(data, dateIso) {
+    return [...((data.planByDate.get(dateIso)?.outfitIds) || [])];
+  }
+
+  function sameIds(a, b) {
+    return JSON.stringify(a || []) === JSON.stringify(b || []);
+  }
+
   // Pick an outfit and ADD it to the day (extra entry).
-  async function addOutfitToDay(dateIso) {
-    const result = await pickOutfit({ currentId: null, allowClear: false });
+  async function addOutfitToDay(dateIso, data) {
+    const result = await pickOutfit({
+      currentId: null,
+      allowClear: false,
+      reuseContext: pickerReuseContext(dateIso, data)
+    });
     if (typeof result !== 'string') { await renderAll(); return; }
+    if (targetOutfitIds(data, dateIso).includes(result)) {
+      toast('That day already has this outfit');
+      await renderAll();
+      return;
+    }
     await dayPlans.addOutfit(id, dateIso, result);
     toast('Outfit added', { kind: 'success' });
     await renderAll();
   }
 
   // Tap an existing outfit on a day to replace or remove it.
-  async function replaceOutfitOnDay(dateIso, idx, currentId) {
-    const result = await pickOutfit({ currentId });
+  async function replaceOutfitOnDay(dateIso, idx, currentId, data) {
+    const result = await pickOutfit({
+      currentId,
+      reuseContext: pickerReuseContext(dateIso, data, currentId)
+    });
     if (result === undefined) { await renderAll(); return; }
     const existing = await dayPlans.get(id, dateIso);
     const list = existing ? [...(existing.outfitIds || [])] : [];
@@ -194,11 +277,250 @@ export async function view({ id }) {
       // Remove this entry
       list.splice(idx, 1);
     } else {
+      if (list.some((oid, i) => i !== idx && oid === result)) {
+        toast('That day already has this outfit');
+        await renderAll();
+        return;
+      }
       list[idx] = result;
     }
     await dayPlans.setOutfits(id, dateIso, list, existing ? existing.notes : '');
     toast(result === null ? 'Outfit removed' : 'Outfit updated');
     await renderAll();
+  }
+
+  function renderReuseCallout(summary) {
+    const copy = reuseSummaryCopy(summary);
+    if (!copy) return null;
+    return el('div', { class: `reuse-callout ${summary.level === 'strong' ? 'reuse-callout-strong' : 'reuse-callout-soft'}` }, [
+      el('div', { class: 'reuse-callout-title' }, copy.title),
+      el('div', { class: 'reuse-callout-detail' }, copy.detail)
+    ]);
+  }
+
+  function actionRow({ icon, title, sub, danger = false, onClick, href }) {
+    const attrs = href
+      ? { class: 'list-row', href, onClick }
+      : { type: 'button', class: 'list-row', onClick };
+    if (danger) attrs.style = { color: 'var(--danger)' };
+    return el(href ? 'a' : 'button', attrs, [
+      el('div', { class: 'thumb' }, icon),
+      el('div', { class: 'row-body' }, [
+        el('div', { class: 'row-title' }, title),
+        sub ? el('div', { class: 'row-sub' }, sub) : null
+      ])
+    ]);
+  }
+
+  async function openDayActions(dateIso, data) {
+    const outfitIds = targetOutfitIds(data, dateIso);
+    const label = formatDayLabel(dateIso);
+    await sheet({
+      title: `${label.weekday} ${label.short}`,
+      body: (close) => el('div', { class: 'list' }, [
+        actionRow({
+          icon: '👔',
+          title: outfitIds.length ? 'Add another outfit' : 'Choose outfit',
+          sub: outfitIds.length ? 'Keep what is planned and add one more' : 'Pick an outfit for this day',
+          onClick: async () => { close(); await addOutfitToDay(dateIso, data); }
+        }),
+        outfitIds.length ? actionRow({
+          icon: '↪',
+          title: 'Copy day to another date',
+          sub: 'Add to or replace a different trip day',
+          onClick: async () => { close(); await copyDayToAnotherDate(dateIso, data); }
+        }) : null,
+        outfitIds.length ? actionRow({
+          icon: '🗑️',
+          title: 'Clear this day',
+          danger: true,
+          onClick: async () => {
+            close();
+            const ok = await confirm({ title: 'Clear this day?', message: 'This removes the planned outfits from this date. Outfits and items are kept.', confirmLabel: 'Clear', danger: true });
+            if (!ok) return;
+            await dayPlans.clear(id, dateIso);
+            toast('Day cleared');
+            await renderAll();
+          }
+        }) : null
+      ])
+    });
+  }
+
+  async function openOutfitDayActions(dateIso, idx, outfitId, data) {
+    const outfit = data.outfitsById.get(outfitId);
+    if (!outfit) return;
+    const label = formatDayLabel(dateIso);
+    const reuseSummary = buildOutfitReuseSummary({
+      outfit,
+      date: dateIso,
+      planByDate: data.planByDate,
+      outfitsById: data.outfitsById,
+      itemsById: data.itemsById
+    });
+
+    await sheet({
+      title: outfit.name || `${label.weekday} ${label.short}`,
+      body: (close) => el('div', { class: 'day-action-sheet' }, [
+        renderReuseCallout(reuseSummary),
+        el('div', { class: 'list' }, [
+          actionRow({
+            icon: '👁',
+            title: 'View outfit',
+            sub: 'Open the outfit details',
+            href: `#/outfit/${outfit.id}`,
+            onClick: () => close()
+          }),
+          actionRow({
+            icon: '🔁',
+            title: 'Replace outfit',
+            sub: 'Choose a different outfit for this spot',
+            onClick: async () => { close(); await replaceOutfitOnDay(dateIso, idx, outfitId, data); }
+          }),
+          actionRow({
+            icon: '⧉',
+            title: 'Duplicate for this day',
+            sub: 'Make an editable copy and keep the original unchanged',
+            onClick: async () => { close(); await duplicateOutfitForDay(dateIso, idx, outfitId); }
+          }),
+          actionRow({
+            icon: '↪',
+            title: 'Copy to another date',
+            sub: 'Reuse this outfit on a different trip day',
+            onClick: async () => { close(); await copyOutfitToAnotherDate(dateIso, outfitId, data); }
+          }),
+          actionRow({
+            icon: '🗑️',
+            title: 'Remove from this day',
+            danger: true,
+            onClick: async () => {
+              close();
+              const existing = await dayPlans.get(id, dateIso);
+              const list = existing ? [...(existing.outfitIds || [])] : [];
+              list.splice(idx, 1);
+              await dayPlans.setOutfits(id, dateIso, list, existing ? existing.notes : '');
+              toast('Outfit removed');
+              await renderAll();
+            }
+          })
+        ])
+      ])
+    });
+  }
+
+  async function duplicateOutfitForDay(dateIso, idx, outfitId) {
+    try {
+      const copy = await outfitsStore.duplicate(outfitId);
+      const existing = await dayPlans.get(id, dateIso);
+      const list = existing ? [...(existing.outfitIds || [])] : [];
+      list[idx] = copy.id;
+      await dayPlans.setOutfits(id, dateIso, list, existing ? existing.notes : '');
+      toast('Outfit duplicated', { kind: 'success' });
+      location.hash = `#/outfit/${copy.id}/edit`;
+    } catch (err) {
+      toast('Duplicate failed: ' + err.message, { kind: 'danger' });
+      await renderAll();
+    }
+  }
+
+  async function copyOutfitToAnotherDate(sourceDate, outfitId, data) {
+    const targetDate = await pickTargetDate(sourceDate, data, {
+      title: 'Copy outfit to',
+      preventOutfitId: outfitId
+    });
+    if (!targetDate) { await renderAll(); return; }
+    const existing = await dayPlans.get(id, targetDate);
+    const current = existing ? [...(existing.outfitIds || [])] : [];
+    if (current.includes(outfitId)) {
+      toast('That day already has this outfit');
+      await renderAll();
+      return;
+    }
+    await dayPlans.setOutfits(id, targetDate, [...current, outfitId], existing ? existing.notes : '');
+    toast(`Copied to ${formatDateShort(targetDate)}`, { kind: 'success' });
+    await renderAll();
+  }
+
+  async function copyDayToAnotherDate(sourceDate, data) {
+    const sourceIds = targetOutfitIds(data, sourceDate);
+    if (!sourceIds.length) {
+      toast('Choose an outfit first');
+      await renderAll();
+      return;
+    }
+    const targetDate = await pickTargetDate(sourceDate, data, { title: 'Copy day to' });
+    if (!targetDate) { await renderAll(); return; }
+    const existing = await dayPlans.get(id, targetDate);
+    const current = existing ? [...(existing.outfitIds || [])] : [];
+    const mode = current.length ? await pickCopyMode(targetDate, current.length) : 'add';
+    if (!mode) { await renderAll(); return; }
+    const next = mergeOutfitIds(current, sourceIds, { mode });
+    if (mode === 'add' && sameIds(next, current)) {
+      toast('That day already has those outfits');
+      await renderAll();
+      return;
+    }
+    if (mode === 'replace' && sameIds(next, current)) {
+      toast('That day already matches');
+      await renderAll();
+      return;
+    }
+    await dayPlans.setOutfits(id, targetDate, next, existing ? existing.notes : '');
+    toast(mode === 'replace' ? 'Day replaced' : 'Day copied', { kind: 'success' });
+    await renderAll();
+  }
+
+  async function pickTargetDate(sourceDate, data, { title, preventOutfitId = null } = {}) {
+    const dates = daysBetween(trip.startDate, trip.endDate).filter(date => date !== sourceDate);
+    if (!dates.length) {
+      toast('This trip has no other days');
+      return null;
+    }
+    return sheet({
+      title: title || 'Choose date',
+      body: (close) => el('div', { class: 'list target-date-list' }, dates.map(dateIso => {
+        const label = formatDayLabel(dateIso);
+        const ids = targetOutfitIds(data, dateIso);
+        const hasDuplicate = preventOutfitId && ids.includes(preventOutfitId);
+        return el('button', {
+          type: 'button',
+          class: 'list-row' + (hasDuplicate ? ' is-disabled' : ''),
+          disabled: !!hasDuplicate,
+          onClick: () => close(dateIso)
+        }, [
+          el('div', { class: 'thumb' }, label.day),
+          el('div', { class: 'row-body' }, [
+            el('div', { class: 'row-title' }, `${label.weekday} ${label.short}`),
+            el('div', { class: 'row-sub' }, hasDuplicate
+              ? 'Already has this outfit'
+              : ids.length
+                ? `${ids.length} outfit${ids.length === 1 ? '' : 's'} planned`
+                : 'No outfits planned')
+          ]),
+          hasDuplicate ? null : el('span', { class: 'row-chevron' }, '›')
+        ]);
+      }))
+    });
+  }
+
+  async function pickCopyMode(targetDate, targetCount) {
+    return sheet({
+      title: `Copy to ${formatDateShort(targetDate)}`,
+      body: (close) => el('div', { class: 'list' }, [
+        actionRow({
+          icon: '+',
+          title: 'Add missing outfits',
+          sub: `Keep the ${targetCount} already planned and add anything new`,
+          onClick: () => close('add')
+        }),
+        actionRow({
+          icon: '↺',
+          title: 'Replace day',
+          sub: 'Use the copied day instead',
+          onClick: () => close('replace')
+        })
+      ])
+    });
   }
 
   async function openTripMenu() {

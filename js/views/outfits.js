@@ -3,6 +3,7 @@ import { items as itemsStore, outfits as outfitsStore } from '../store.js';
 import { renderStack, outfitRollup } from '../components/outfit-stack.js';
 import { releaseOwner } from '../image.js';
 import { shareOutfits } from '../share.js';
+import { cleanSearchQuery, outfitMatchesQuery } from '../search.js';
 
 export async function view() {
   const OWNER = 'outfits-list';
@@ -30,8 +31,51 @@ export async function view() {
     return { node: root, cleanup: () => releaseOwner(OWNER) };
   }
 
-  const grid = el('div', { class: 'outfit-grid' });
-  list.forEach(o => {
+  const params = new URLSearchParams((location.hash.split('?')[1] || ''));
+  const state = { q: cleanSearchQuery(params.get('q') || '') };
+  const searchInput = el('input', {
+    type: 'search',
+    value: state.q,
+    placeholder: 'Search outfits',
+    'aria-label': 'Search outfits',
+    inputmode: 'search',
+    enterkeyhint: 'search',
+    onInput: (e) => {
+      state.q = cleanSearchQuery(e.target.value);
+      if (e.target.value !== state.q) e.target.value = state.q;
+      update();
+    }
+  });
+  const clearSearchBtn = el('button', {
+    type: 'button',
+    class: 'search-clear',
+    'aria-label': 'Clear search',
+    hidden: !state.q,
+    onClick: () => {
+      state.q = '';
+      searchInput.value = '';
+      searchInput.focus();
+      update();
+    }
+  }, '×');
+  root.appendChild(el('div', { class: 'search-box' }, [
+    el('span', { class: 'search-icon', 'aria-hidden': 'true' }, '🔍'),
+    searchInput,
+    clearSearchBtn
+  ]));
+
+  const results = el('div');
+  root.appendChild(results);
+
+  function syncUrl() {
+    const qs = state.q ? `?q=${encodeURIComponent(state.q)}` : '';
+    const hash = `#/outfits${qs}`;
+    if (location.hash !== hash) {
+      try { history.replaceState(history.state, '', hash); } catch { location.hash = hash; }
+    }
+  }
+
+  function renderOutfitCard(o) {
     const stack = renderStack({ outfit: o, itemsById, size: 'md', ownerKey: OWNER });
     const r = outfitRollup({ outfit: o, itemsById });
     const rollupBadge = r.total === 0
@@ -40,14 +84,43 @@ export async function view() {
         ? el('span', { class: 'badge badge-success' }, '✓ Complete')
         : el('span', { class: 'badge badge-warn' }, `$ ${r.toBuy} to buy`);
 
-    grid.appendChild(el('a', { class: 'outfit-card' + (o.aiGenerated ? ' is-ai' : ''), href: `#/outfit/${o.id}` }, [
+    return el('a', { class: 'outfit-card' + (o.aiGenerated ? ' is-ai' : ''), href: `#/outfit/${o.id}` }, [
       o.aiGenerated ? el('span', { class: 'ai-corner-badge', 'aria-label': 'AI-suggested', title: 'AI-suggested' }, '✨') : null,
       stack,
       el('div', { class: 'outfit-name' }, o.name || 'Untitled'),
       el('div', { class: 'outfit-rollup' }, rollupBadge)
-    ]));
-  });
-  root.appendChild(grid);
+    ]);
+  }
+
+  function renderResults() {
+    const visible = list.filter(o => outfitMatchesQuery(o, itemsById, state.q));
+    if (!visible.length) {
+      results.replaceChildren(el('div', { class: 'state' }, [
+        el('div', { class: 'state-icon' }, '🔍'),
+        el('h3', null, 'No matching outfits'),
+        el('p', null, 'Try a different search.'),
+        el('button', {
+          type: 'button',
+          class: 'btn btn-secondary',
+          onClick: () => {
+            state.q = '';
+            searchInput.value = '';
+            update();
+          }
+        }, 'Clear search')
+      ]));
+      return;
+    }
+    results.replaceChildren(el('div', { class: 'outfit-grid' }, visible.map(renderOutfitCard)));
+  }
+
+  function update() {
+    clearSearchBtn.hidden = !state.q;
+    syncUrl();
+    renderResults();
+  }
+
+  update();
   return { node: root, cleanup: () => releaseOwner(OWNER) };
 }
 

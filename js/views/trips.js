@@ -1,20 +1,46 @@
 import { el, renderTopbar, sheet, toast } from '../ui.js';
 import { trips as tripsStore, tripStats, formatDateRange } from '../store.js';
 import { releaseOwner } from '../image.js';
+import {
+  dismissSetup, loadSetupStatus, renderSetupCard, shouldShowSetupCard
+} from '../setup.js';
 
 export async function view() {
   releaseOwner('trips-list');
   renderTopbar({ title: 'My Trips', right: el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'New trip', onClick: openNewTripSheet }, '+') });
 
-  const list = await tripsStore.all();
+  const [list, setupStatus] = await Promise.all([
+    tripsStore.all(),
+    loadSetupStatus().catch(() => null)
+  ]);
   const root = el('div', { class: 'trips-view' });
+  const setupVisible = shouldShowSetupCard(setupStatus);
+  if (setupVisible) {
+    let setupCard;
+    setupCard = renderSetupCard(setupStatus, {
+      onCreateTrip: openNewTripSheet,
+      onDismiss: () => {
+        dismissSetup();
+        if (setupCard && setupCard.parentNode) setupCard.remove();
+        toast('Setup guide hidden');
+      }
+    });
+    root.appendChild(setupCard);
+  }
 
   if (!list.length) {
-    root.appendChild(el('div', { class: 'state' }, [
+    const emptyChildren = [
       el('div', { class: 'state-icon' }, '🧳'),
-      el('h3', null, 'Plan your first trip'),
-      el('p', null, 'Set the dates and assemble outfits day-by-day.'),
-      el('button', { type: 'button', class: 'btn btn-primary', onClick: openNewTripSheet }, 'Create trip')
+      el('h3', null, setupVisible ? 'No trips yet' : 'Plan your first trip'),
+      el('p', null, setupVisible
+        ? 'Create a trip when you are ready. It will appear here.'
+        : 'Set the dates and assemble outfits day-by-day.')
+    ];
+    if (!setupVisible) {
+      emptyChildren.push(el('button', { type: 'button', class: 'btn btn-primary', onClick: openNewTripSheet }, 'Create trip'));
+    }
+    root.appendChild(el('div', { class: 'state' }, [
+      ...emptyChildren
     ]));
     return { node: root };
   }

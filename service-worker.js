@@ -12,7 +12,7 @@
 //     take over by posting { type: 'SKIP_WAITING' }.
 //
 // Bump CACHE_NAME on any shell change.
-const CACHE_NAME = 'outfit-planner-v12';
+const CACHE_NAME = 'outfit-planner-v18';
 const PRECACHE = [
   './',
   './index.html',
@@ -25,12 +25,16 @@ const PRECACHE = [
   './js/ui.js',
   './js/db.js',
   './js/store.js',
+  './js/packing.js',
+  './js/reuse.js',
+  './js/search.js',
   './js/image.js',
   './js/exporter.js',
   './js/share.js',
   './js/storage.js',
   './js/backup.js',
   './js/update.js',
+  './js/setup.js',
   './js/vendor/idb.js',
   './js/components/nav.js',
   './js/components/outfit-stack.js',
@@ -45,6 +49,7 @@ const PRECACHE = [
   './js/views/outfit-editor.js',
   './js/views/trips.js',
   './js/views/trip-detail.js',
+  './js/views/trip-packing.js',
   './js/views/stylist.js',
   './js/views/settings.js',
   './js/stylist/color.js',

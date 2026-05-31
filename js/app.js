@@ -10,6 +10,7 @@ import { setupUpdates } from './update.js';
 // ---- Register routes ----
 register('/', () => import('./views/trips.js').then(m => m.view({})));
 register('/trips', () => import('./views/trips.js').then(m => m.view({})));
+register('/trip/:id/packing', (p) => import('./views/trip-packing.js').then(m => m.view(p)));
 register('/trip/:id', (p) => import('./views/trip-detail.js').then(m => m.view(p)));
 register('/outfits', () => import('./views/outfits.js').then(m => m.view({})));
 register('/outfit/new', () => import('./views/outfit-editor.js').then(m => m.view({ id: 'new' })));

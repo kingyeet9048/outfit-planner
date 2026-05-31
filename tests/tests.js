@@ -3,12 +3,24 @@
 import { openDB } from '../js/vendor/idb.js';
 import { match, register } from '../js/router.js';
 import { el, backControl } from '../js/ui.js';
+import {
+  TAG_LIMITS, availableTags, filterItems, itemMatchesQuery, normalizeTags, outfitMatchesQuery
+} from '../js/search.js';
 import { parseIntent } from '../js/stylist/intent.js';
 import { buildItemContext, generateOutfits } from '../js/stylist/engine.js';
 import { rgbToHsv, colorTone, harmonyScore, classifyHarmony } from '../js/stylist/color.js';
 import { blobToBase64, base64ToBlob, buildExport, importFromObject, SCHEMA_VERSION } from '../js/exporter.js';
 import * as db from '../js/db.js';
 import { items, outfits, trips, dayPlans, daysBetween, formatDayLabel, formatDateRange, tripShoppingList, tripStats, retailerFromUrl, groupShoppingByRetailer } from '../js/store.js';
+import { buildOutfitReuseSummary, mergeOutfitIds, nextCopyName, reuseSummaryCopy, reuseSummaryShortText } from '../js/reuse.js';
+import { pickItem, pickOutfit } from '../js/components/picker.js';
+import {
+  addCustomPackingItem,
+  deriveTripPacking,
+  normalizePackingState,
+  removeCustomPackingItem,
+  setCustomPackingItemChecked
+} from '../js/packing.js';
 import { renderOutfitsCanvas, canvasToBlob, shareOutfits } from '../js/share.js';
 import { isStandalone, isPersisted, isStorageProtected, isIOS } from '../js/storage.js';
 import {
@@ -16,8 +28,12 @@ import {
   getCounts, isDatabaseEmpty, restoreFromFile, supportsFileSystemAccess, supportsShareFile,
   getLastBackupAt, setLastBackupAt, LAST_BACKUP_KEY
 } from '../js/backup.js';
+import {
+  buildSetupStatus, dismissSetup, isSetupDismissed, loadSetupFacts, renderSetupCard,
+  renderSetupSettingsRow, resetSetupDismissal, SETUP_DISMISSED_KEY, shouldShowSetupCard
+} from '../js/setup.js';
 import { openInstallGuide, refreshStorageBanner } from '../js/components/storage-banner.js';
-import { showBackupReminder, showRestorePrompt } from '../js/components/backup-prompts.js';
+import { shouldOfferRestorePromptForCounts, showBackupReminder, showRestorePrompt } from '../js/components/backup-prompts.js';
 import { shouldPromptUpdate, showUpdateBanner, dismissUpdateBanner, UPDATE_CHECK_INTERVAL_MS } from '../js/update.js';
 
 const TEST_DB = 'outfit-planner-test';
@@ -102,6 +118,13 @@ test('router: match with single param', () => {
   assertEq(m.params, { id: 'abc-123' });
 });
 
+test('router: match trip packing route', () => {
+  register('/trip/:id/packing', () => null);
+  const m = match('#/trip/abc-123/packing');
+  assertTrue(m && m.route, 'no match');
+  assertEq(m.params, { id: 'abc-123' });
+});
+
 test('router: strips trailing slash but preserves root', () => {
   register('/foo', () => null);
   assertTrue(match('#/foo') && match('#/foo/'), 'should match both');
@@ -155,6 +178,199 @@ test('formatDateRange: across days', () => {
   assertEq(s, 'Jul 1 – Jul 14, 2026');
 });
 
+test('reuse: top/pant cross-day reuse produces a strong warning', () => {
+  const itemsById = new Map([
+    ['top1', { id: 'top1', name: 'White tee' }],
+    ['pant1', { id: 'pant1', name: 'Blue pants' }],
+    ['shoe1', { id: 'shoe1', name: 'Sneakers' }]
+  ]);
+  const planned = { id: 'o1', name: 'Monday', topId: 'top1', pantId: 'pant1', shoesId: 'shoe1', accessoryIds: [] };
+  const candidate = { id: 'o2', name: 'Tuesday', topId: 'top1', pantId: 'pant1', shoesId: 'shoe1', accessoryIds: [] };
+  const outfitsById = new Map([[planned.id, planned], [candidate.id, candidate]]);
+  const planByDate = new Map([['2026-07-01', { date: '2026-07-01', outfitIds: [planned.id] }]]);
+  const summary = buildOutfitReuseSummary({ outfit: candidate, date: '2026-07-02', planByDate, outfitsById, itemsById });
+  assertEq(summary.level, 'strong');
+  assertTrue(summary.strongMatches.some(m => m.slot === 'top'), 'top is strong');
+  assertTrue(summary.strongMatches.some(m => m.slot === 'pant'), 'pant is strong');
+  const copy = reuseSummaryCopy(summary);
+  assertEq(copy.title, 'Main pieces repeat');
+  assertTrue(/White tee \(top\) repeats on Jul 1 in Monday/.test(copy.detail), copy.detail);
+  assertTrue(/Blue pants \(pant\) repeats on Jul 1 in Monday/.test(copy.detail), copy.detail);
+});
+
+test('reuse: slot-specific warnings only count the same slot on the planned outfit', () => {
+  const itemsById = new Map([
+    ['top1', { id: 'top1', name: 'White tee' }],
+    ['pant1', { id: 'pant1', name: 'Blue pants' }],
+    ['otherTop', { id: 'otherTop', name: 'Black shirt' }],
+    ['otherPant', { id: 'otherPant', name: 'Khakis' }]
+  ]);
+  const planned = {
+    id: 'o1',
+    name: 'Packed extras',
+    topId: 'otherTop',
+    pantId: 'otherPant',
+    shoesId: null,
+    accessoryIds: ['top1'],
+    otherIds: ['pant1']
+  };
+  const candidate = {
+    id: 'o2',
+    name: 'Candidate',
+    topId: 'top1',
+    pantId: 'pant1',
+    shoesId: null,
+    accessoryIds: [],
+    otherIds: []
+  };
+  const outfitsById = new Map([[planned.id, planned], [candidate.id, candidate]]);
+  const planByDate = new Map([['2026-07-01', { date: '2026-07-01', outfitIds: [planned.id] }]]);
+  const summary = buildOutfitReuseSummary({ outfit: candidate, date: '2026-07-02', planByDate, outfitsById, itemsById });
+  assertEq(summary.hasReuse, false);
+  assertEq(summary.strongMatches, []);
+});
+
+test('reuse: mixed-slot matches do not inflate top and pant copy', () => {
+  const itemsById = new Map([
+    ['top1', { id: 'top1', name: 'White tee' }],
+    ['pant1', { id: 'pant1', name: 'Blue pants' }],
+    ['otherPant', { id: 'otherPant', name: 'Khakis' }]
+  ]);
+  const planned = {
+    id: 'o1',
+    name: 'Monday',
+    topId: 'top1',
+    pantId: 'otherPant',
+    shoesId: null,
+    accessoryIds: [],
+    otherIds: ['pant1']
+  };
+  const candidate = {
+    id: 'o2',
+    name: 'Tuesday',
+    topId: 'top1',
+    pantId: 'pant1',
+    shoesId: null,
+    accessoryIds: [],
+    otherIds: []
+  };
+  const outfitsById = new Map([[planned.id, planned], [candidate.id, candidate]]);
+  const planByDate = new Map([['2026-07-01', { date: '2026-07-01', outfitIds: [planned.id] }]]);
+  const summary = buildOutfitReuseSummary({ outfit: candidate, date: '2026-07-02', planByDate, outfitsById, itemsById });
+  assertEq(summary.level, 'strong');
+  assertEq(summary.strongMatches.map(m => m.slot), ['top']);
+  assertTrue(/White tee \(top\) repeats on Jul 1 in Monday/.test(reuseSummaryCopy(summary).detail));
+});
+
+test('reuse: split repeated slots stay tied to their actual dates and outfits', () => {
+  const itemsById = new Map([
+    ['top1', { id: 'top1', name: 'White tee' }],
+    ['pant1', { id: 'pant1', name: 'Blue pants' }],
+    ['top2', { id: 'top2', name: 'Black shirt' }],
+    ['pant2', { id: 'pant2', name: 'Khakis' }]
+  ]);
+  const topDay = { id: 'o1', name: 'Top day', topId: 'top1', pantId: 'pant2' };
+  const pantDay = { id: 'o2', name: 'Pant day', topId: 'top2', pantId: 'pant1' };
+  const candidate = { id: 'o3', name: 'Candidate', topId: 'top1', pantId: 'pant1' };
+  const outfitsById = new Map([[topDay.id, topDay], [pantDay.id, pantDay], [candidate.id, candidate]]);
+  const planByDate = new Map([
+    ['2026-07-01', { date: '2026-07-01', outfitIds: [topDay.id] }],
+    ['2026-07-02', { date: '2026-07-02', outfitIds: [pantDay.id] }]
+  ]);
+  const summary = buildOutfitReuseSummary({ outfit: candidate, date: '2026-07-03', planByDate, outfitsById, itemsById });
+  const short = reuseSummaryShortText(summary);
+  assertTrue(/White tee \(top\) repeats on Jul 1/.test(short), short);
+  assertTrue(/Blue pants \(pant\) repeats on Jul 2/.test(short), short);
+  assertTrue(!/White tee \(top\) and Blue pants \(pant\) repeat on Jul 1 and Jul 2/.test(short), short);
+  const copy = reuseSummaryCopy(summary).detail;
+  assertTrue(/White tee \(top\) repeats on Jul 1 in Top day/.test(copy), copy);
+  assertTrue(/Blue pants \(pant\) repeats on Jul 2 in Pant day/.test(copy), copy);
+});
+
+test('reuse: shoes/accessories are lower-severity and same-day use is ignored', () => {
+  const itemsById = new Map([
+    ['shoe1', { id: 'shoe1', name: 'Sneakers' }],
+    ['watch1', { id: 'watch1', name: 'Watch' }]
+  ]);
+  const planned = { id: 'o1', name: 'Monday', topId: null, pantId: null, shoesId: 'shoe1', accessoryIds: ['watch1'] };
+  const candidate = { id: 'o2', name: 'Tuesday', topId: null, pantId: null, shoesId: 'shoe1', accessoryIds: ['watch1'] };
+  const outfitsById = new Map([[planned.id, planned], [candidate.id, candidate]]);
+  const planByDate = new Map([['2026-07-01', { date: '2026-07-01', outfitIds: [planned.id] }]]);
+  const summary = buildOutfitReuseSummary({ outfit: candidate, date: '2026-07-02', planByDate, outfitsById, itemsById });
+  assertEq(summary.level, 'soft');
+  assertEq(reuseSummaryCopy(summary).title, 'Easy repeat');
+
+  const sameDay = buildOutfitReuseSummary({ outfit: candidate, date: '2026-07-01', planByDate, outfitsById, itemsById });
+  assertEq(sameDay.hasReuse, false);
+});
+
+test('reuse: mergeOutfitIds and copy names prevent accidental duplicates', () => {
+  assertEq(mergeOutfitIds(['a', 'b'], ['b', 'c'], { mode: 'add' }), ['a', 'b', 'c']);
+  assertEq(mergeOutfitIds(['a', 'b'], ['b', 'c', 'c'], { mode: 'replace' }), ['b', 'c']);
+  assertEq(nextCopyName('Airport outfit', ['Airport outfit', 'Airport outfit copy']), 'Airport outfit copy 2');
+});
+
+test('packing: derives assigned outfit items once and splits owned vs to-buy', () => {
+  const top = { id: 'top1', name: 'White tee', category: 'top', owned: 1 };
+  const pant = { id: 'pant1', name: 'Jeans', category: 'pant', owned: true };
+  const shoes = { id: 'shoes1', name: 'Sandals', category: 'shoes', owned: 0 };
+  const outfitA = { id: 'outfitA', topId: top.id, pantId: null, shoesId: shoes.id, accessoryIds: [], otherIds: [] };
+  const outfitB = { id: 'outfitB', topId: top.id, pantId: pant.id, shoesId: shoes.id, accessoryIds: [], otherIds: [] };
+  const summary = deriveTripPacking({
+    plans: [
+      { date: '2026-07-01', outfitIds: [outfitA.id, outfitB.id] },
+      { date: '2026-07-02', outfitIds: [outfitA.id] }
+    ],
+    outfitsById: new Map([[outfitA.id, outfitA], [outfitB.id, outfitB]]),
+    itemsById: new Map([[top.id, top], [pant.id, pant], [shoes.id, shoes]])
+  });
+  assertEq(summary.ownedItems.map(i => i.id), [top.id, pant.id]);
+  assertEq(summary.toBuyItems.map(i => i.id), [shoes.id]);
+  assertEq(summary.totalCount, 2);
+});
+
+test('packing: progress includes checked owned items and custom checklist items', () => {
+  const top = { id: 'top1', name: 'Top', category: 'top', owned: true };
+  const outfit = { id: 'outfit1', topId: top.id, pantId: null, shoesId: null, accessoryIds: [], otherIds: [] };
+  const summary = deriveTripPacking({
+    plans: [{ date: '2026-07-01', outfitIds: [outfit.id] }],
+    outfitsById: new Map([[outfit.id, outfit]]),
+    itemsById: new Map([[top.id, top]]),
+    packing: {
+      checkedItemIds: [top.id],
+      customItems: [
+        { id: 'passport', label: 'Passport', checked: true },
+        { id: 'charger', label: 'Charger', checked: false }
+      ]
+    }
+  });
+  assertEq(summary.totalCount, 3);
+  assertEq(summary.checkedCount, 2);
+  assertEq(summary.progress, 2 / 3);
+});
+
+test('packing: custom helpers normalize, check, and remove custom items', () => {
+  let state = addCustomPackingItem(null, { id: 'passport', label: '  Passport  ', nowIso: '2026-07-01T00:00:00.000Z' });
+  assertEq(state.customItems.map(i => i.label), ['Passport']);
+  state = setCustomPackingItemChecked(state, 'passport', true, '2026-07-02T00:00:00.000Z');
+  assertEq(state.customItems[0].checked, true);
+  assertEq(state.customItems[0].updatedAt, '2026-07-02T00:00:00.000Z');
+  state = removeCustomPackingItem(state, 'passport');
+  assertEq(state.customItems, []);
+  assertEq(normalizePackingState({ checkedItemIds: ['a', 'a', '', null], customItems: [{ name: 'Legacy', packed: true }] }), {
+    checkedItemIds: ['a'],
+    customItems: [{ id: 'custom-1', label: 'Legacy', checked: true, createdAt: '', updatedAt: '' }]
+  });
+  const duplicateIds = normalizePackingState({
+    customItems: [
+      { id: 'passport', label: 'Passport' },
+      { id: 'passport', label: 'Backup passport copy' },
+      { label: 'Adapter' }
+    ]
+  });
+  assertEq(duplicateIds.customItems.map(item => item.id), ['passport', 'passport-2', 'custom-3']);
+});
+
 test('el(): textarea `value` populates the displayed value (regression: setAttribute(value) is silently ignored on textareas)', () => {
   const ta = el('textarea', { value: 'multi\nline\ntext' });
   assertEq(ta.value, 'multi\nline\ntext');
@@ -163,6 +379,39 @@ test('el(): textarea `value` populates the displayed value (regression: setAttri
 test('el(): input `value` populates the displayed value', () => {
   const inp = el('input', { type: 'text', value: 'hello' });
   assertEq(inp.value, 'hello');
+});
+
+test('search.normalizeTags: lowercases, dedupes, strips hashes, and enforces limits', () => {
+  const many = Array.from({ length: TAG_LIMITS.maxTags + 5 }, (_, i) => `Extra${i}`);
+  const tags = normalizeTags([' Beach ', '#BEACH', 'Dinner Fits', 'x'.repeat(80), ...many]);
+  assertEq(tags[0], 'beach');
+  assertEq(tags[1], 'dinner fits');
+  assertEq(tags[2], 'x'.repeat(TAG_LIMITS.maxLength));
+  assertEq(tags.length, TAG_LIMITS.maxTags);
+  assertEq(new Set(tags).size, tags.length);
+});
+
+test('search.filterItems: combines category, ownership, q, and tag filters', () => {
+  const wardrobe = [
+    { id: '1', name: 'White Linen Shirt', category: 'top', owned: 1, tags: ['Beach', 'Capsule'] },
+    { id: '2', name: 'Black Jeans', category: 'pant', owned: 1, tags: ['city'] },
+    { id: '3', name: 'Gold Sandals', category: 'shoes', owned: 0, tags: ['beach'] }
+  ];
+  assertEq(availableTags(wardrobe), ['beach', 'capsule', 'city']);
+  assertEq(filterItems(wardrobe, { filter: 'top', q: 'linen', tag: 'BEACH' }).map(i => i.id), ['1']);
+  assertEq(filterItems(wardrobe, { filter: 'tobuy', tag: 'beach' }).map(i => i.id), ['3']);
+  assertEq(itemMatchesQuery(wardrobe[0], 'capsule shirt'), true);
+});
+
+test('search.outfitMatchesQuery: matches outfit text and contained item names/tags', () => {
+  const top = { id: 'top1', name: 'Silk Cami', tags: ['Dinner'] };
+  const shoes = { id: 'shoe1', name: 'Black Heel', tags: ['Formal'] };
+  const outfit = { name: 'Evening look', notes: 'Rooftop reservation', topId: top.id, shoesId: shoes.id, accessoryIds: [], otherIds: [] };
+  const itemsById = new Map([[top.id, top], [shoes.id, shoes]]);
+  assertEq(outfitMatchesQuery(outfit, itemsById, 'rooftop'), true);
+  assertEq(outfitMatchesQuery(outfit, itemsById, 'silk dinner'), true);
+  assertEq(outfitMatchesQuery(outfit, itemsById, 'formal heel'), true);
+  assertEq(outfitMatchesQuery(outfit, itemsById, 'airport'), false);
 });
 
 test('items.put: preserves existing imageBlob when imageBlob is not in input (defensive against WebKit IDB blob corruption on re-write)', async () => {
@@ -195,6 +444,24 @@ test('items.put: re-wraps the existing blob into a fresh in-memory Blob (not the
     const bytes = new Uint8Array(await cur.imageBlob.arrayBuffer());
     assertEq(Array.from(bytes), Array.from(original));
   }
+});
+
+test('items.put: normalizes tags and preserves them on metadata-only updates', async () => {
+  await withTestDb();
+  const first = await items.put({ name: 'Taggy Tee', category: 'top', tags: ['Beach', '#BEACH', ' Capsule '] });
+  assertEq(first.tags, ['beach', 'capsule']);
+  const updated = await items.put({ id: first.id, name: 'Renamed Tee', category: 'top', owned: true });
+  assertEq(updated.tags, ['beach', 'capsule']);
+  const cleared = await items.put({ id: first.id, name: 'Renamed Tee', category: 'top', owned: true, tags: [] });
+  assertEq(cleared.tags, []);
+});
+
+test('items.put: partial updates preserve to-buy ownership', async () => {
+  await withTestDb();
+  const first = await items.put({ name: 'Wishlist Sandals', category: 'shoes', owned: false, tags: ['beach'] });
+  assertEq(first.owned, 0);
+  const updated = await items.put({ id: first.id, name: 'Wishlist Sandals', category: 'shoes', tags: ['beach', 'sale'] });
+  assertEq(updated.owned, 0);
 });
 
 // ----- Stylist tests -----
@@ -374,6 +641,23 @@ test('IDB: outfit reuses item ids', async () => {
   assertEq(got.pantId, pant.id);
 });
 
+test('IDB: duplicate outfit creates a new outfit id while reusing item ids', async () => {
+  await withTestDb();
+  const beforeItems = await items.all();
+  const top = await items.put({ name: 'T', category: 'top' });
+  const shoes = await items.put({ name: 'S', category: 'shoes' });
+  const original = await outfits.put({ name: 'Travel look', topId: top.id, shoesId: shoes.id, accessoryIds: [top.id], notes: 'Keep this' });
+  const copy = await outfits.duplicate(original.id);
+  assertTrue(copy.id !== original.id, 'copy gets a new id');
+  assertEq(copy.name, 'Travel look copy');
+  assertEq(copy.topId, top.id);
+  assertEq(copy.shoesId, shoes.id);
+  assertEq(copy.accessoryIds, [top.id]);
+  assertEq(copy.notes, 'Keep this');
+  const afterItems = await items.all();
+  assertEq(afterItems.length, beforeItems.length + 2);
+});
+
 test('IDB: delete item cascades — removed from outfits', async () => {
   await withTestDb();
   const top = await items.put({ name: 'T', category: 'top' });
@@ -398,6 +682,26 @@ test('IDB: delete trip cascades to dayPlans', async () => {
   await trips.remove(trip.id);
   const after = await dayPlans.byTrip(trip.id);
   assertEq(after.length, 0);
+});
+
+test('IDB: trip packing state persists on trips and survives trip edits', async () => {
+  await withTestDb();
+  const trip = await trips.put({ name: 'T', startDate: '2026-07-01', endDate: '2026-07-03' });
+  await trips.setPacking(trip.id, {
+    checkedItemIds: ['item1'],
+    customItems: [{ id: 'passport', label: 'Passport', checked: true }]
+  });
+  const saved = await trips.get(trip.id);
+  assertEq(saved.packing.checkedItemIds, ['item1']);
+  assertEq(saved.packing.customItems[0].label, 'Passport');
+
+  await trips.put({ id: trip.id, name: 'Renamed trip' });
+  const edited = await trips.get(trip.id);
+  assertEq(edited.name, 'Renamed trip');
+  assertEq(edited.startDate, '2026-07-01');
+  assertEq(edited.endDate, '2026-07-03');
+  assertEq(edited.packing.checkedItemIds, ['item1']);
+  assertEq(edited.packing.customItems[0].checked, true);
 });
 
 test('IDB: delete outfit removes it from outfitIds in dayPlans', async () => {
@@ -500,6 +804,16 @@ test('IDB: addOutfit is idempotent + removeOutfit auto-deletes empty day', async
   assertEq(plan2, undefined);
 });
 
+test('IDB: setOutfits dedupes target-day outfit ids', async () => {
+  await withTestDb();
+  const trip = await trips.put({ name: 'T', startDate: '2026-07-01', endDate: '2026-07-01' });
+  const o1 = await outfits.put({ name: 'O1' });
+  const o2 = await outfits.put({ name: 'O2' });
+  await dayPlans.setOutfits(trip.id, '2026-07-01', [o1.id, o2.id, o1.id, o2.id]);
+  const plan = await dayPlans.get(trip.id, '2026-07-01');
+  assertEq(plan.outfitIds, [o1.id, o2.id]);
+});
+
 test('importer: legacy outfitId → outfitIds[] migration', async () => {
   await withTestDb();
   const legacyData = {
@@ -515,6 +829,37 @@ test('importer: legacy outfitId → outfitIds[] migration', async () => {
   assertEq(plans[0].outfitIds, ['old-outfit-id']);
 });
 
+test('importer: canonicalizes day plan ids and dedupes outfit ids', async () => {
+  await withTestDb();
+  await importFromObject({
+    schemaVersion: SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    items: [],
+    outfits: [
+      { id: 'outfit-1', name: 'One' },
+      { id: 'outfit-2', name: 'Two' }
+    ],
+    trips: [{ id: 'trip1', name: 'T', startDate: '2026-07-01', endDate: '2026-07-01' }],
+    dayPlans: [{
+      id: 'stale-plan-id',
+      tripId: 'trip1',
+      date: '2026-07-01',
+      outfitIds: ['outfit-1', 'outfit-2', 'outfit-1', '', null],
+      notes: 'Keep this'
+    }]
+  }, { mode: 'replace' });
+
+  const plan = await dayPlans.get('trip1', '2026-07-01');
+  assertEq(plan.id, 'trip1_2026-07-01');
+  assertEq(plan.outfitIds, ['outfit-1', 'outfit-2']);
+  assertEq(plan.notes, 'Keep this');
+
+  const exported = await buildExport();
+  assertEq(exported.dayPlans[0].id, 'trip1_2026-07-01');
+  assertEq(exported.dayPlans[0].outfitIds, ['outfit-1', 'outfit-2']);
+  assertEq('outfitId' in exported.dayPlans[0], false);
+});
+
 test('trips: rejects reversed date range', async () => {
   await withTestDb();
   await assertThrows(() => trips.put({ name: 'X', startDate: '2026-07-10', endDate: '2026-07-01' }), 'End date');
@@ -523,7 +868,7 @@ test('trips: rejects reversed date range', async () => {
 test('export/import: full roundtrip preserves items, outfits, trips, dayPlans', async () => {
   await withTestDb();
   // Seed
-  const top = await items.put({ name: 'Shirt', category: 'top', owned: true });
+  const top = await items.put({ name: 'Shirt', category: 'top', owned: true, tags: ['Beach', 'Capsule'] });
   const pant = await items.put({ name: 'Pants', category: 'pant', owned: false });
   const acc = await items.put({ name: 'Watch', category: 'accessory', subcategory: 'watch', owned: true });
   const o = await outfits.put({ name: 'Outfit A', topId: top.id, pantId: pant.id, accessoryIds: [acc.id] });
@@ -536,6 +881,7 @@ test('export/import: full roundtrip preserves items, outfits, trips, dayPlans', 
   assertEq(exported.outfits.length, 1);
   assertEq(exported.trips.length, 1);
   assertEq(exported.dayPlans.length, 1);
+  assertEq(exported.items.find(i => i.id === top.id).tags, ['beach', 'capsule']);
 
   // Serialize through JSON to simulate file roundtrip
   const json = JSON.stringify(exported);
@@ -549,11 +895,87 @@ test('export/import: full roundtrip preserves items, outfits, trips, dayPlans', 
 
   const allItems = await items.all();
   assertEq(allItems.length, 3);
+  assertEq(allItems.find(i => i.id === top.id).tags, ['beach', 'capsule']);
   const got = await outfits.get(o.id);
   assertEq(got.name, 'Outfit A');
   const plans = await dayPlans.byTrip(trip.id);
   assertEq(plans.length, 1);
   assertEq(plans[0].outfitIds, [o.id]);
+});
+
+test('export/import: preserves trip packing checklist state', async () => {
+  await withTestDb();
+  const trip = await trips.put({ name: 'Packing trip', startDate: '2026-07-01', endDate: '2026-07-02' });
+  await trips.setPacking(trip.id, {
+    checkedItemIds: ['owned-item'],
+    customItems: [{ id: 'passport', label: 'Passport', checked: true }]
+  });
+  const exported = await buildExport();
+  assertEq(exported.trips[0].packing.checkedItemIds, ['owned-item']);
+  assertEq(exported.trips[0].packing.customItems[0].label, 'Passport');
+
+  await withTestDb();
+  await importFromObject(JSON.parse(JSON.stringify(exported)), { mode: 'replace' });
+  const restored = await trips.get(trip.id);
+  assertEq(restored.packing.checkedItemIds, ['owned-item']);
+  assertEq(restored.packing.customItems[0].checked, true);
+});
+
+test('export/import: older exports without trip.packing import with an empty checklist', async () => {
+  await withTestDb();
+  await importFromObject({
+    schemaVersion: SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    items: [{ id: 'old-item', name: 'Old shirt', category: 'top', owned: true }],
+    outfits: [],
+    trips: [{ id: 'old-trip', name: 'Old', startDate: '2026-07-01', endDate: '2026-07-01' }],
+    dayPlans: []
+  }, { mode: 'replace' });
+  const restoredItem = await items.get('old-item');
+  assertEq(restoredItem.tags, []);
+  const restored = await trips.get('old-trip');
+  assertEq(restored.packing, { checkedItemIds: [], customItems: [] });
+});
+
+test('export/import: merge of older export preserves existing tags, image blobs, and packing', async () => {
+  await withTestDb();
+  const bytes = new Uint8Array([9, 8, 7, 6]);
+  const blob = new Blob([bytes], { type: 'image/jpeg' });
+  const item = await items.put({
+    id: 'merge-item',
+    name: 'Existing shirt',
+    category: 'top',
+    owned: false,
+    tags: ['Beach'],
+    imageBlob: blob
+  });
+  const trip = await trips.put({ id: 'merge-trip', name: 'Existing trip', startDate: '2026-08-01', endDate: '2026-08-02' });
+  await trips.setPacking(trip.id, {
+    checkedItemIds: [item.id],
+    customItems: [{ id: 'passport', label: 'Passport', checked: true }]
+  });
+
+  await importFromObject({
+    schemaVersion: SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    items: [{ id: item.id, name: 'Imported shirt', category: 'top', owned: true }],
+    outfits: [],
+    trips: [{ id: trip.id, name: 'Imported trip', startDate: '2026-08-01', endDate: '2026-08-02' }],
+    dayPlans: []
+  }, { mode: 'merge' });
+
+  const mergedItem = await items.get(item.id);
+  assertEq(mergedItem.name, 'Imported shirt');
+  assertEq(mergedItem.owned, 1);
+  assertEq(mergedItem.tags, ['beach']);
+  assertTrue(mergedItem.imageBlob && mergedItem.imageBlob.size === bytes.length, 'existing image blob preserved');
+  assertEq(Array.from(new Uint8Array(await mergedItem.imageBlob.arrayBuffer())), Array.from(bytes));
+
+  const mergedTrip = await trips.get(trip.id);
+  assertEq(mergedTrip.name, 'Imported trip');
+  assertEq(mergedTrip.packing.checkedItemIds, [item.id]);
+  assertEq(mergedTrip.packing.customItems[0].label, 'Passport');
+  assertEq(mergedTrip.packing.customItems[0].checked, true);
 });
 
 test('export/import: rejects wrong schemaVersion', async () => {
@@ -942,6 +1364,152 @@ test('backup.restoreFromFile: imports a backup File and restores data into an em
   assertEq(all[0].name, 'Keep me');
 });
 
+// ----- First-run setup -----
+test('setup.buildSetupStatus: derives checklist from facts, not dismissal storage', () => {
+  const prev = localStorage.getItem(SETUP_DISMISSED_KEY);
+  try {
+    resetSetupDismissal();
+    const status = buildSetupStatus({
+      facts: { itemCount: 1, outfitCount: 1, tripCount: 1, dayPlanCount: 1, assignedDayCount: 0, firstTripId: 'trip1' },
+      storageProtected: true
+    });
+    assertEq(status.completeCount, 4);
+    assertEq(status.done, false);
+    assertEq(status.steps.map(s => [s.id, s.complete]), [
+      ['protect', true],
+      ['items', true],
+      ['outfits', true],
+      ['trip', true],
+      ['plan', false]
+    ]);
+    dismissSetup();
+    const afterDismiss = buildSetupStatus({
+      facts: { itemCount: 1, outfitCount: 1, tripCount: 1, dayPlanCount: 1, assignedDayCount: 0, firstTripId: 'trip1' },
+      storageProtected: true
+    });
+    assertEq(afterDismiss.steps.map(s => [s.id, s.complete]), status.steps.map(s => [s.id, s.complete]));
+    assertEq(isSetupDismissed(), true);
+  } finally {
+    if (prev == null) localStorage.removeItem(SETUP_DISMISSED_KEY);
+    else localStorage.setItem(SETUP_DISMISSED_KEY, prev);
+  }
+});
+
+test('setup.shouldShowSetupCard: restore prompt and dismissal take precedence', () => {
+  const prev = localStorage.getItem(SETUP_DISMISSED_KEY);
+  try {
+    resetSetupDismissal();
+    const ready = buildSetupStatus({ facts: { itemCount: 1 }, restorePromptPending: false });
+    const waitingForRestore = buildSetupStatus({ facts: {}, restorePromptPending: true });
+    assertEq(shouldShowSetupCard(ready), true);
+    assertEq(shouldShowSetupCard(waitingForRestore), false);
+    dismissSetup();
+    assertEq(shouldShowSetupCard(ready), false);
+  } finally {
+    if (prev == null) localStorage.removeItem(SETUP_DISMISSED_KEY);
+    else localStorage.setItem(SETUP_DISMISSED_KEY, prev);
+  }
+});
+
+test('backup prompt helper: restore is offered only for blank, not-started-fresh data', () => {
+  const startedKey = 'outfit-planner:startedFresh';
+  const shownKey = 'outfit-planner:restorePromptShown';
+  const prevStarted = localStorage.getItem(startedKey);
+  const prevShown = sessionStorage.getItem(shownKey);
+  try {
+    localStorage.removeItem(startedKey);
+    sessionStorage.removeItem(shownKey);
+    assertEq(shouldOfferRestorePromptForCounts({ items: 0, outfits: 0, trips: 0, dayPlans: 0 }), true);
+    assertEq(shouldOfferRestorePromptForCounts({ items: 1, outfits: 0, trips: 0, dayPlans: 0 }), false);
+    localStorage.setItem(startedKey, '1');
+    assertEq(shouldOfferRestorePromptForCounts({ items: 0, outfits: 0, trips: 0, dayPlans: 0 }), false);
+    localStorage.removeItem(startedKey);
+    sessionStorage.setItem(shownKey, '1');
+    assertEq(shouldOfferRestorePromptForCounts({ items: 0, outfits: 0, trips: 0, dayPlans: 0 }), false);
+  } finally {
+    if (prevStarted == null) localStorage.removeItem(startedKey);
+    else localStorage.setItem(startedKey, prevStarted);
+    if (prevShown == null) sessionStorage.removeItem(shownKey);
+    else sessionStorage.setItem(shownKey, prevShown);
+  }
+});
+
+test('setup.loadSetupFacts: note-only day plans do not complete the planning step', async () => {
+  await withTestDb();
+  const trip = await trips.put({ name: 'T', startDate: '2026-07-01', endDate: '2026-07-02' });
+  await dayPlans.setOutfits(trip.id, '2026-07-01', [], 'Bring sunscreen');
+  let facts = await loadSetupFacts();
+  assertEq(facts.tripCount, 1);
+  assertEq(facts.dayPlanCount, 1);
+  assertEq(facts.assignedDayCount, 0);
+  assertEq(facts.firstTripId, trip.id);
+  const outfit = await outfits.put({ name: 'Travel day' });
+  await dayPlans.addOutfit(trip.id, '2026-07-01', outfit.id);
+  facts = await loadSetupFacts();
+  assertEq(facts.assignedDayCount, 1);
+});
+
+test('setup.buildSetupStatus: plan step waits for a real trip target', () => {
+  const noTrip = buildSetupStatus({ facts: { itemCount: 1, outfitCount: 1 }, storageProtected: true });
+  const blockedPlan = noTrip.steps.find(step => step.id === 'plan');
+  assertEq(blockedPlan.blocked, true);
+  assertEq(blockedPlan.href, '');
+  assertEq(blockedPlan.action, 'After trip');
+
+  const withTrip = buildSetupStatus({
+    facts: { itemCount: 1, outfitCount: 1, tripCount: 1, firstTripId: 'trip1' },
+    storageProtected: true
+  });
+  const readyPlan = withTrip.steps.find(step => step.id === 'plan');
+  assertEq(readyPlan.blocked, false);
+  assertEq(readyPlan.href, '#/trip/trip1');
+  assertEq(readyPlan.action, 'Plan');
+});
+
+test('UI: setup card renders checklist actions and dismissal affordance', () => {
+  const status = buildSetupStatus({
+    facts: { itemCount: 1, firstTripId: 'trip1' },
+    storageProtected: false
+  });
+  let protectedClicks = 0, tripClicks = 0, dismissClicks = 0;
+  const card = renderSetupCard(status, {
+    onProtect: () => { protectedClicks++; },
+    onCreateTrip: () => { tripClicks++; },
+    onDismiss: () => { dismissClicks++; }
+  });
+  assertTrue(/First-run setup/.test(card.textContent), 'card title');
+  assertTrue(/1 of 5 done/.test(card.textContent), 'progress comes from status');
+  const buttons = [...card.querySelectorAll('button')];
+  buttons.find(b => b.textContent === 'Protect').click();
+  buttons.find(b => b.textContent === 'Create').click();
+  card.querySelector('.setup-dismiss').click();
+  assertEq(protectedClicks, 1);
+  assertEq(tripClicks, 1);
+  assertEq(dismissClicks, 1);
+  assertTrue(card.querySelector('a[href="#/outfit/new"]'), 'outfit action is a route link');
+});
+
+test('UI: setup settings row shows progress and toggles visibility hint', () => {
+  const prev = localStorage.getItem(SETUP_DISMISSED_KEY);
+  try {
+    resetSetupDismissal();
+    const status = buildSetupStatus({ facts: { itemCount: 1 }, storageProtected: true });
+    let toggles = 0;
+    const visibleRow = renderSetupSettingsRow(status, { onToggleDismissal: () => { toggles++; } });
+    assertTrue(/2 of 5 done/.test(visibleRow.textContent), 'shows progress');
+    assertTrue(/Shown on Trips/.test(visibleRow.textContent), 'visible state');
+    visibleRow.querySelector('button').click();
+    assertEq(toggles, 1);
+    dismissSetup();
+    const hiddenRow = renderSetupSettingsRow(status, { onToggleDismissal: () => { toggles++; } });
+    assertTrue(/Hidden on Trips/.test(hiddenRow.textContent), 'hidden state');
+    assertEq(hiddenRow.querySelector('button').textContent, 'Show');
+  } finally {
+    if (prev == null) localStorage.removeItem(SETUP_DISMISSED_KEY);
+    else localStorage.setItem(SETUP_DISMISSED_KEY, prev);
+  }
+});
+
 // ----- UI tests -----
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 function ensureUiRoots() {
@@ -971,6 +1539,259 @@ function setupShellDom() {
   if (!banner) { banner = document.createElement('div'); banner.id = 'storage-banner'; banner.hidden = true; main.appendChild(banner); }
   return { main, banner };
 }
+function ensureViewRoot() {
+  let root = document.getElementById('view-root');
+  if (!root) { root = document.createElement('main'); root.id = 'view-root'; document.body.appendChild(root); }
+  return root;
+}
+
+test('UI: setup card avoids a duplicate empty-trip create button', async () => {
+  ensureUiRoots();
+  ensureViewRoot();
+  const prev = localStorage.getItem(SETUP_DISMISSED_KEY);
+  try {
+    resetSetupDismissal();
+    await withTestDb();
+    await items.put({ name: 'Travel tee', category: 'top' });
+    await outfits.put({ name: 'Airport look' });
+    const { view: tripsView } = await import('../js/views/trips.js');
+    const result = await tripsView();
+    const createButtons = [...result.node.querySelectorAll('button')]
+      .filter(btn => btn.textContent.trim() === 'Create');
+    assertEq(createButtons.length, 1);
+    assertTrue(/No trips yet/.test(result.node.textContent || ''), 'empty state remains visible');
+  } finally {
+    if (prev == null) localStorage.removeItem(SETUP_DISMISSED_KEY);
+    else localStorage.setItem(SETUP_DISMISSED_KEY, prev);
+  }
+});
+
+test('UI: list search clear buttons hide until a query is active and keep URL state', async () => {
+  ensureUiRoots();
+  const root = ensureViewRoot();
+  await withTestDb();
+  const top = await items.put({ name: 'Travel Tee', category: 'top', tags: ['Airport'] });
+  await outfits.put({ name: 'Airport Look', notes: 'Boarding day', topId: top.id });
+
+  history.replaceState(history.state, '', '#/items');
+  const { view: itemsView } = await import('../js/views/items.js');
+  const itemResult = await itemsView();
+  root.replaceChildren(itemResult.node);
+  let clear = root.querySelector('.search-clear');
+  assertTrue(clear.hidden, 'item clear button starts hidden');
+  assertEq(getComputedStyle(clear).display, 'none');
+  let search = root.querySelector('input[type="search"]');
+  search.value = 'airport';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  assertEq(location.hash, '#/items?q=airport');
+  assertEq(clear.hidden, false);
+  clear.click();
+  assertEq(location.hash, '#/items');
+  assertTrue(clear.hidden, 'item clear button hides again');
+  itemResult.cleanup?.();
+
+  history.replaceState(history.state, '', '#/outfits');
+  const { view: outfitsView } = await import('../js/views/outfits.js');
+  const outfitResult = await outfitsView();
+  root.replaceChildren(outfitResult.node);
+  clear = root.querySelector('.search-clear');
+  assertTrue(clear.hidden, 'outfit clear button starts hidden');
+  assertEq(getComputedStyle(clear).display, 'none');
+  search = root.querySelector('input[type="search"]');
+  search.value = 'boarding';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  assertEq(location.hash, '#/outfits?q=boarding');
+  assertEq(clear.hidden, false);
+  clear.click();
+  assertEq(location.hash, '#/outfits');
+  assertTrue(clear.hidden, 'outfit clear button hides again');
+  outfitResult.cleanup?.();
+});
+
+test('UI: item picker search filters by item name and tags inside the sheet', async () => {
+  ensureUiRoots();
+  closeAllSheets();
+  await withTestDb();
+  await items.put({ name: 'Travel Tee', category: 'top', tags: ['Airport'] });
+  await items.put({ name: 'Dinner Blouse', category: 'top', tags: ['evening'] });
+
+  const pickerPromise = pickItem({ category: 'top', allowClear: false, ownerKey: 'test-picker' });
+  await wait(40);
+  const dlg = currentSheet();
+  assertTrue(dlg, 'picker sheet opened');
+  const search = dlg.querySelector('input[type="search"]');
+  assertTrue(search, 'search input rendered');
+  const clear = dlg.querySelector('.search-clear');
+  assertTrue(clear && clear.hidden, 'picker clear button starts hidden');
+  assertEq(getComputedStyle(clear).display, 'none');
+  search.value = 'airport';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  assertEq(clear.hidden, false);
+  const names = [...dlg.querySelectorAll('.item-card .item-name')].map(n => n.textContent);
+  assertEq(names, ['Travel Tee']);
+  clear.click();
+  assertEq([...dlg.querySelectorAll('.item-card .item-name')].map(n => n.textContent), ['Dinner Blouse', 'Travel Tee']);
+  assertTrue(clear.hidden, 'picker clear button hides after clearing');
+  dlg.querySelector('.sheet-header .icon-btn').click();
+  assertEq(await pickerPromise, undefined);
+});
+
+test('UI: outfit picker search matches notes and contained item tags', async () => {
+  ensureUiRoots();
+  closeAllSheets();
+  await withTestDb();
+  const top = await items.put({ name: 'Silk Cami', category: 'top', tags: ['Dinner'] });
+  await outfits.put({ name: 'Evening Look', notes: 'Rooftop reservation', topId: top.id });
+  await outfits.put({ name: 'Airport Look', notes: 'Boarding day' });
+
+  const pickerPromise = pickOutfit({ allowClear: false });
+  await wait(40);
+  const dlg = currentSheet();
+  assertTrue(dlg, 'picker sheet opened');
+  const search = dlg.querySelector('input[type="search"]');
+  assertTrue(search, 'search input rendered');
+  const clear = dlg.querySelector('.search-clear');
+  assertTrue(clear && clear.hidden, 'picker clear button starts hidden');
+  assertEq(getComputedStyle(clear).display, 'none');
+  search.value = 'dinner';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  assertEq(clear.hidden, false);
+  assertEq([...dlg.querySelectorAll('.row-title')].map(n => n.textContent), ['Evening Look']);
+  search.value = 'boarding';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  assertEq([...dlg.querySelectorAll('.row-title')].map(n => n.textContent), ['Airport Look']);
+  clear.click();
+  assertEq([...dlg.querySelectorAll('.row-title')].map(n => n.textContent), ['Airport Look', 'Evening Look']);
+  assertTrue(clear.hidden, 'picker clear button hides after clearing');
+  dlg.querySelector('.sheet-header .icon-btn').click();
+  assertEq(await pickerPromise, undefined);
+});
+
+test('UI: outfit picker shows reuse context and prevents same-day duplicates', async () => {
+  ensureUiRoots();
+  closeAllSheets();
+  await withTestDb();
+  const top = await items.put({ name: 'White tee', category: 'top', owned: true });
+  const pant = await items.put({ name: 'Blue pants', category: 'pant', owned: true });
+  const shoes = await items.put({ name: 'Sneakers', category: 'shoes', owned: true });
+  const reused = await outfits.put({ name: 'Already planned', topId: top.id, pantId: pant.id, shoesId: shoes.id });
+  const target = await outfits.put({ name: 'Target day outfit', topId: top.id, pantId: pant.id, shoesId: shoes.id });
+  const trip = await trips.put({ name: 'T', startDate: '2026-07-01', endDate: '2026-07-02' });
+  await dayPlans.setOutfits(trip.id, '2026-07-01', [reused.id]);
+  await dayPlans.setOutfits(trip.id, '2026-07-02', [target.id]);
+  const [allItems, allOutfits, plans] = await Promise.all([items.all(), outfits.all(), dayPlans.byTrip(trip.id)]);
+  const pickerPromise = pickOutfit({
+    allowClear: false,
+    reuseContext: {
+      date: '2026-07-02',
+      planByDate: new Map(plans.map(p => [p.date, p])),
+      outfitsById: new Map(allOutfits.map(o => [o.id, o])),
+      itemsById: new Map(allItems.map(i => [i.id, i])),
+      preventTargetDuplicates: true
+    }
+  });
+  await wait(80);
+  const dlg = currentSheet();
+  assertTrue(dlg, 'picker opened');
+  const text = dlg.textContent || '';
+  assertTrue(/White tee \(top\) and Blue pants \(pant\) repeat on Jul 1/.test(text), text);
+  assertTrue(/Already on this day/.test(text), 'duplicate target note shown');
+  const targetRow = [...dlg.querySelectorAll('button.list-row')].find(btn => /Target day outfit/.test(btn.textContent || ''));
+  assertTrue(targetRow && targetRow.disabled, 'target-day duplicate is disabled');
+  const closeBtn = dlg.querySelector('[aria-label="Close"]');
+  closeBtn.click();
+  assertEq(await pickerPromise, undefined);
+});
+
+test('UI: outfit picker clear action names the scoped outfit removal', async () => {
+  ensureUiRoots();
+  closeAllSheets();
+  await withTestDb();
+  const top = await items.put({ name: 'White tee', category: 'top', owned: true });
+  const outfit = await outfits.put({ name: 'Current outfit', topId: top.id });
+  const pickerPromise = pickOutfit({ currentId: outfit.id });
+  await wait(80);
+  const dlg = currentSheet();
+  assertTrue(dlg, 'picker opened');
+  assertTrue(/Remove this outfit/.test(dlg.textContent || ''), 'clear action is scoped to one outfit');
+  assertTrue(!/Clear this day/.test(dlg.textContent || ''), 'does not imply the whole day is cleared');
+  dlg.querySelector('[aria-label="Close"]').click();
+  assertEq(await pickerPromise, undefined);
+});
+
+test('UI: outfit detail menu offers duplicate without replacing native Back control', async () => {
+  ensureUiRoots();
+  closeAllSheets();
+  let topbar = document.getElementById('topbar');
+  if (!topbar) { topbar = document.createElement('div'); topbar.id = 'topbar'; document.body.appendChild(topbar); }
+  await withTestDb();
+  const top = await items.put({ name: 'White tee', category: 'top', owned: true });
+  const outfit = await outfits.put({ name: 'Original look', topId: top.id });
+  const { view: outfitView } = await import('../js/views/outfit-view.js');
+  const result = await outfitView({ id: outfit.id });
+  try {
+    const backBtn = topbar.querySelector('.topbar-left button[aria-label="Back"]');
+    assertTrue(backBtn, 'detail view still renders history-aware Back button');
+    topbar.querySelector('.topbar-right button[aria-label="More"]').click();
+    await wait(80);
+    const dlg = currentSheet();
+    assertTrue(dlg, 'menu opens');
+    assertTrue(/Duplicate outfit/.test(dlg.textContent || ''), 'duplicate action is in menu');
+    dlg.querySelector('[aria-label="Close"]').click();
+  } finally {
+    result.cleanup?.();
+    closeAllSheets();
+  }
+});
+
+test('UI: trip packing view renders pack/to-buy sections and persists checklist changes', async () => {
+  ensureUiRoots();
+  await withTestDb();
+  const owned = await items.put({ name: 'Linen shirt', category: 'top', owned: true });
+  const toBuy = await items.put({ name: 'Travel sandals', category: 'shoes', owned: false, purchaseUrl: 'https://example.com/sandals' });
+  const outfit = await outfits.put({ name: 'Beach day', topId: owned.id, shoesId: toBuy.id });
+  const trip = await trips.put({ name: 'Beach trip', startDate: '2026-07-01', endDate: '2026-07-01' });
+  await dayPlans.setOutfits(trip.id, '2026-07-01', [outfit.id]);
+
+  const { view: packingView } = await import('../js/views/trip-packing.js');
+  const result = await packingView({ id: trip.id });
+  try {
+    const text = result.node.textContent || '';
+    assertTrue(/Pack/.test(text), 'shows Pack section');
+    assertTrue(/To buy/.test(text), 'shows To buy split');
+    assertTrue(/Travel sandals/.test(text), 'shows unowned assigned item in to-buy split');
+    assertTrue(/Used WED Jul 1/.test(text), 'shows trip-day use context');
+
+    const markOwned = result.node.querySelector('[aria-label="Mark Travel sandals as owned"]');
+    assertTrue(markOwned, 'to-buy packing row can be marked owned');
+    markOwned.click();
+    await wait(80);
+    const nowOwned = await items.get(toBuy.id);
+    assertEq(nowOwned.owned, 1);
+    assertTrue(result.node.querySelector(`[data-pack-item-id="${toBuy.id}"]`), 'marked-owned item moves into pack checklist');
+
+    const ownedCheck = result.node.querySelector(`[data-pack-item-id="${owned.id}"]`);
+    assertTrue(ownedCheck, 'owned assigned item is checkable');
+    ownedCheck.checked = true;
+    ownedCheck.dispatchEvent(new Event('change', { bubbles: true }));
+    await wait(80);
+    const saved = await trips.get(trip.id);
+    assertEq(saved.packing.checkedItemIds, [owned.id]);
+
+    const input = result.node.querySelector('input[name="customPackingItem"]');
+    const form = result.node.querySelector('.packing-add-form');
+    const addButton = form.querySelector('button[type="submit"]');
+    assertEq(input.getAttribute('aria-label'), 'Add custom packing item');
+    assertEq(addButton.getAttribute('aria-label'), 'Add custom item to packing list');
+    input.value = 'Phone charger';
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await wait(80);
+    const withCustom = await trips.get(trip.id);
+    assertTrue(withCustom.packing.customItems.some(item => item.label === 'Phone charger'), 'custom item persisted');
+  } finally {
+    if (result.cleanup) result.cleanup();
+  }
+});
 
 test('UI: storage banner reflects protection state (shown + tappable when unprotected)', async () => {
   ensureUiRoots();
