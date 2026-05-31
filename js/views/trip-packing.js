@@ -110,12 +110,13 @@ export async function view({ id }) {
     trip = await tripsStore.get(id);
     currentData = await loadData();
     const summary = derive();
-    root.replaceChildren(
+    const sections = [
       renderHeader(summary),
       renderPackSection(summary),
-      summary.toBuyItems.length ? renderToBuySection(summary) : null,
       renderCustomSection(summary)
-    );
+    ];
+    if (summary.toBuyItems.length) sections.splice(2, 0, renderToBuySection(summary));
+    root.replaceChildren(...sections);
     updateProgress();
   }
 
