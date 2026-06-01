@@ -187,6 +187,62 @@ body {
 .status-pill.status-ok { background: var(--success-soft); color: var(--success); }
 
 /* ---------- First-run setup ---------- */
+.activation-hero {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--hairline);
+  background:
+    linear-gradient(135deg, rgba(15,118,110,.12), rgba(15,118,110,0) 52%),
+    var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+.activation-copy { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 6px; }
+.activation-copy h2 { font-size: 24px; font-weight: 880; line-height: 1.12; }
+.activation-copy p:not(.setup-eyebrow) { color: var(--text-muted); line-height: 1.45; max-width: 560px; }
+.activation-preview {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.activation-preview-card {
+  min-height: 72px;
+  padding: 11px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.activation-preview-card span { color: var(--text-muted); font-size: 12px; font-weight: 760; }
+.activation-preview-card strong { font-size: 14px; line-height: 1.15; }
+.activation-preview-card.is-muted { background: var(--accent-soft); color: var(--accent); }
+.activation-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.activation-actions .btn { flex: 1 1 150px; }
+.activation-actions .activation-restore { flex: 0 1 auto; }
+@media (min-width: 720px) {
+  .activation-hero { grid-template-columns: minmax(0, 1.3fr) minmax(280px, .7fr); align-items: center; }
+  .activation-preview { grid-column: 2; grid-row: 1 / span 2; }
+  .activation-actions { grid-column: 1; }
+}
+@media (max-width: 380px) {
+  .activation-preview { grid-template-columns: 1fr; }
+}
+
 .setup-card {
   background: var(--surface-raised);
   border: 1px solid var(--hairline);
@@ -989,6 +1045,55 @@ dialog.sheet::backdrop { background: rgba(0,0,0,.4); }
 .toast.toast-danger { background: var(--danger); color: #fff; }
 .toast.toast-success { background: var(--success); color: #fff; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ---------- Alpha feedback prompt ---------- */
+.feedback-root {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  right: max(12px, env(safe-area-inset-right));
+  bottom: calc(var(--tabbar-h) + 18px + env(safe-area-inset-bottom));
+  z-index: 140;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.feedback-prompt {
+  width: min(100%, 520px);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  background: var(--surface-glass);
+  color: var(--text);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  -webkit-backdrop-filter: blur(22px) saturate(1.15);
+  backdrop-filter: blur(22px) saturate(1.15);
+  pointer-events: auto;
+  animation: toast-in .18s ease-out;
+}
+.feedback-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.feedback-copy strong { font-size: 14px; font-weight: 820; }
+.feedback-copy span { color: var(--text-muted); font-size: 13px; line-height: 1.35; }
+.feedback-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.feedback-actions .btn { min-height: 40px; flex: 1 1 auto; }
+.feedback-form { display: grid; gap: 8px; }
+.feedback-form textarea {
+  width: 100%;
+  min-height: 78px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 16px;
+  resize: vertical;
+}
+.feedback-form textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-ring); outline: none; }
+.feedback-thanks { align-items: center; text-align: center; }
+@media (min-width: 1024px) {
+  .feedback-root { left: auto; right: 16px; bottom: 16px; width: 420px; }
+}
 
 /* ---------- Settings groups ---------- */
 .settings-group { margin-bottom: 24px; }

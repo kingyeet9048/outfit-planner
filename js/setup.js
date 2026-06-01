@@ -121,6 +121,58 @@ export function shouldShowSetupCard(status, { dismissed = isSetupDismissed() } =
   return !dismissed;
 }
 
+export function isSetupEmpty(status) {
+  const facts = status && status.facts;
+  if (!facts) return false;
+  return (facts.itemCount + facts.outfitCount + facts.tripCount + facts.dayPlanCount) === 0;
+}
+
+export function shouldShowActivationHero(status) {
+  if (!status || status.restorePromptPending) return false;
+  return isSetupEmpty(status);
+}
+
+export function renderActivationHero({ onTryDemo, onCreateTrip, onRestore } = {}) {
+  return el('section', { class: 'activation-hero', 'aria-label': 'Get started' }, [
+    el('div', { class: 'activation-copy' }, [
+      el('p', { class: 'setup-eyebrow' }, 'New here?'),
+      el('h2', null, 'See a planned trip in one tap'),
+      el('p', null, 'Open a sample weekend with outfits, day plans and a shopping list before adding your own closet.')
+    ]),
+    el('div', { class: 'activation-preview', 'aria-hidden': 'true' }, [
+      el('div', { class: 'activation-preview-card' }, [
+        el('span', null, 'Day 1'),
+        el('strong', null, 'Travel day')
+      ]),
+      el('div', { class: 'activation-preview-card' }, [
+        el('span', null, 'Day 2'),
+        el('strong', null, 'Dinner walk')
+      ]),
+      el('div', { class: 'activation-preview-card is-muted' }, [
+        el('span', null, 'Shopping'),
+        el('strong', null, '1 to buy')
+      ])
+    ]),
+    el('div', { class: 'activation-actions' }, [
+      el('button', {
+        type: 'button',
+        class: 'btn btn-primary',
+        onClick: () => { if (onTryDemo) onTryDemo(); }
+      }, 'Try demo trip'),
+      el('button', {
+        type: 'button',
+        class: 'btn btn-secondary',
+        onClick: () => { if (onCreateTrip) onCreateTrip(); }
+      }, 'Start my own'),
+      onRestore ? el('button', {
+        type: 'button',
+        class: 'btn btn-ghost activation-restore',
+        onClick: () => onRestore()
+      }, 'Restore backup') : null
+    ])
+  ]);
+}
+
 export function renderSetupCard(status, { onDismiss, onCreateTrip, onProtect = openInstallGuide } = {}) {
   const checklist = el('ol', { class: 'setup-checklist' }, status.steps.map((step, index) => {
     return el('li', { class: 'setup-step' + (step.complete ? ' is-done' : '') }, [

@@ -5,6 +5,8 @@ import { pickOutfit } from '../components/picker.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
 import { buildOutfitReuseSummary, formatDateShort, mergeOutfitIds, reuseSummaryCopy, reuseSummaryShortText } from '../reuse.js';
 import { deriveTripPacking } from '../packing.js';
+import { trackActivation, trackActivationOnce } from '../activation.js';
+import { queueFeedbackPrompt, showQueuedFeedbackPrompt } from '../feedback.js';
 
 const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨', other: '🎒' };
 
@@ -49,6 +51,9 @@ export async function view({ id }) {
     root.replaceChildren();
     root.appendChild(renderHeader(data));
     root.appendChild(renderPackingCta(data));
+    if (data.shopping.length) {
+      trackActivationOnce('shopping_list_viewed', 'shopping_list_viewed', { toBuyCount: data.shopping.length });
+    }
     root.appendChild(renderShoppingList(data));
     root.appendChild(renderDays(data));
   };
@@ -261,7 +266,10 @@ export async function view({ id }) {
     }
     await dayPlans.addOutfit(id, dateIso, result);
     toast('Outfit added', { kind: 'success' });
+    trackActivation('day_planned', { source: 'trip_detail' });
+    queueFeedbackPrompt('day_planned');
     await renderAll();
+    setTimeout(() => { showQueuedFeedbackPrompt(); }, 500);
   }
 
   // Tap an existing outfit on a day to replace or remove it.

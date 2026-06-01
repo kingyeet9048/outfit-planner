@@ -12,6 +12,10 @@ import {
   dismissSetup, isSetupDismissed, loadSetupStatus,
   renderSetupSettingsRow, resetSetupDismissal
 } from '../setup.js';
+import {
+  clearFeedbackEntries, copyFeedbackPacket, getFeedbackSummary
+} from '../feedback.js';
+import { clearActivationEvents, trackActivation } from '../activation.js';
 
 const LAST_EXPORT_KEY = 'outfit-planner:lastExportedAt';
 
@@ -25,6 +29,13 @@ export async function view() {
   setupGroup.appendChild(setupCard);
   root.appendChild(setupGroup);
   renderSetupCard(setupCard);
+
+  // --- Alpha feedback group ---
+  const feedbackGroup = el('div', { class: 'settings-group' }, [el('h3', null, 'Alpha feedback')]);
+  const feedbackCard = el('div', { class: 'settings-card' });
+  feedbackGroup.appendChild(feedbackCard);
+  root.appendChild(feedbackGroup);
+  renderFeedbackCard(feedbackCard);
 
   // --- Data group ---
   const lastExport = localStorage.getItem(LAST_EXPORT_KEY);
@@ -123,11 +134,54 @@ export async function view() {
     card.replaceChildren(...rows);
   }
 
+  function renderFeedbackCard(card) {
+    const summary = getFeedbackSummary();
+    const feedbackLabel = `${summary.feedbackCount} response${summary.feedbackCount === 1 ? '' : 's'}`;
+    const eventLabel = `${summary.activationEventCount} event${summary.activationEventCount === 1 ? '' : 's'}`;
+    card.replaceChildren(
+      settingsRow({
+        label: 'Copy feedback packet',
+        sub: `${feedbackLabel} and ${eventLabel} saved on this device.`,
+        control: el('button', { type: 'button', class: 'btn btn-secondary btn-sm', onClick: onCopyFeedback }, 'Copy')
+      }),
+      settingsRow({
+        label: 'Clear feedback packet',
+        sub: 'Removes local alpha feedback and activation events. Your outfits are not affected.',
+        control: el('button', { type: 'button', class: 'btn btn-ghost btn-sm', onClick: onClearFeedback }, 'Clear')
+      })
+    );
+  }
+
+  async function onCopyFeedback() {
+    try {
+      await copyFeedbackPacket();
+      trackActivation('feedback_packet_copied', { source: 'settings' });
+      renderFeedbackCard(feedbackCard);
+    } catch (err) {
+      toast('Copy failed: ' + (err && err.message ? err.message : 'unknown error'), { kind: 'danger' });
+    }
+  }
+
+  async function onClearFeedback() {
+    const ok = await confirm({
+      title: 'Clear feedback packet?',
+      message: 'This removes feedback responses and activation events saved on this device. Your closet and trips stay intact.',
+      confirmLabel: 'Clear',
+      danger: true
+    });
+    if (!ok) return;
+    clearFeedbackEntries();
+    clearActivationEvents();
+    toast('Feedback packet cleared');
+    renderFeedbackCard(feedbackCard);
+  }
+
   async function onBackupNow() {
     try {
       const res = await backupNow({ allowPrompt: true });
       if (res.method === 'cancelled') return;
       toast('Backup saved', { kind: 'success' });
+      trackActivation('backup_completed', { method: res.method || 'unknown', source: 'settings' });
       renderBackupCard(backupCard);
     } catch (err) {
       toast('Backup failed: ' + (err && err.message ? err.message : 'unknown error'), { kind: 'danger' });
@@ -237,6 +291,7 @@ export async function view() {
     try {
       await downloadExport();
       localStorage.setItem(LAST_EXPORT_KEY, new Date().toISOString());
+      trackActivation('export_completed', { source: 'settings' });
       toast('Export downloaded', { kind: 'success' });
     } catch (err) {
       toast('Export failed: ' + err.message, { kind: 'danger' });
@@ -253,6 +308,7 @@ export async function view() {
         showExportText(str);
       }
       localStorage.setItem(LAST_EXPORT_KEY, new Date().toISOString());
+      trackActivation('export_copied', { source: 'settings' });
     } catch (err) {
       try {
         const str = await exportAsString();
