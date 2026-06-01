@@ -3,6 +3,8 @@ import { back } from '../router.js';
 import { items as itemsStore } from '../store.js';
 import { resizeFile, urlFor, releaseOwner, hasBytes } from '../image.js';
 import { normalizeTags } from '../search.js';
+import { trackActivation } from '../activation.js';
+import { queueFeedbackPrompt } from '../feedback.js';
 
 const CATEGORIES = [
   { value: 'top', label: 'Top' },
@@ -228,6 +230,11 @@ export async function view({ id }) {
       if (state.imageBlobDirty) payload.imageBlob = state.imageBlob;
       const saved = await itemsStore.put(payload);
       toast(isNew ? 'Item added' : 'Item saved', { kind: 'success' });
+      trackActivation(isNew ? 'item_created' : 'item_saved', {
+        category: state.category,
+        owned: !!state.owned
+      });
+      if (isNew) queueFeedbackPrompt('item_created', { category: state.category, owned: !!state.owned });
       state.dirty = false;
       // Land on the read-only view after save — user can re-tap Edit to keep editing.
       location.hash = `#/item/${saved.id}`;

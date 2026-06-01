@@ -6,6 +6,8 @@ import { requestPersistence } from './storage.js';
 import { refreshStorageBanner } from './components/storage-banner.js';
 import { runBackupPrompts } from './components/backup-prompts.js';
 import { setupUpdates } from './update.js';
+import { trackActivation, trackActivationOnce } from './activation.js';
+import { showQueuedFeedbackPrompt } from './feedback.js';
 
 // ---- Register routes ----
 register('/', () => import('./views/trips.js').then(m => m.view({})));
@@ -25,13 +27,16 @@ register('/settings', () => import('./views/settings.js').then(m => m.view({})))
 
 setRouteChangeHandler(({ path }) => {
   renderNav(path);
+  trackActivation('route_viewed', { route: path });
   // Keep the eviction-warning bar in sync on every navigation (cheap, and the
   // protection state can change while the app is open).
   refreshStorageBanner();
+  setTimeout(() => { showQueuedFeedbackPrompt(); }, 500);
 });
 
 // ---- Boot ----
 function boot() {
+  trackActivationOnce('app_opened', 'app_opened');
   // Initial nav render before first route resolves
   renderNav(location.hash || '#/');
 
@@ -70,6 +75,7 @@ function boot() {
       const { downloadExport } = await import('./exporter.js');
       try {
         await downloadExport();
+        trackActivation('export_completed', { source: 'sidebar' });
         toast('Export downloaded', { kind: 'success' });
       } catch (err) {
         toast('Export failed: ' + err.message, { kind: 'danger' });

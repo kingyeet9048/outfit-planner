@@ -3,6 +3,8 @@ import { back } from '../router.js';
 import { items as itemsStore, outfits as outfitsStore } from '../store.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
 import { pickItem } from '../components/picker.js';
+import { trackActivation } from '../activation.js';
+import { queueFeedbackPrompt } from '../feedback.js';
 
 const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨' };
 
@@ -215,6 +217,10 @@ export async function view({ id }) {
         notes: state.notes.trim()
       });
       toast(isNew ? 'Outfit created' : 'Outfit saved', { kind: 'success' });
+      const slotCount = [state.topId, state.pantId, state.shoesId, ...state.accessoryIds, ...state.otherIds]
+        .filter(Boolean).length;
+      trackActivation(isNew ? 'outfit_created' : 'outfit_saved', { slotCount });
+      if (isNew) queueFeedbackPrompt('outfit_created', { slotCount });
       state.dirty = false;
       location.hash = `#/outfit/${saved.id}`;
     } catch (err) {

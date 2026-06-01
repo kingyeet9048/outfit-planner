@@ -31,10 +31,24 @@ import {
 } from '../js/backup.js';
 import {
   buildSetupStatus, dismissSetup, isSetupDismissed, loadSetupFacts, renderSetupCard,
-  renderSetupSettingsRow, resetSetupDismissal, SETUP_DISMISSED_KEY, shouldShowSetupCard
+  renderActivationHero, renderSetupSettingsRow, resetSetupDismissal, SETUP_DISMISSED_KEY,
+  shouldShowActivationHero, shouldShowSetupCard
 } from '../js/setup.js';
-import { openInstallGuide, refreshStorageBanner } from '../js/components/storage-banner.js';
-import { shouldOfferRestorePromptForCounts, showBackupReminder, showRestorePrompt } from '../js/components/backup-prompts.js';
+import { buildDemoDates, DEMO_TRIP_KEY, seedDemoTrip } from '../js/demo.js';
+import {
+  ACTIVATION_LOG_KEY, clearActivationEvents, getActivationEvents, normalizeRoute,
+  sanitizeActivationData, trackActivation
+} from '../js/activation.js';
+import {
+  buildFeedbackPacket, clearFeedbackEntries, FEEDBACK_LOG_KEY, FEEDBACK_PENDING_KEY,
+  FEEDBACK_SESSION_KEY, FEEDBACK_STATE_KEY, getFeedbackEntries, queueFeedbackPrompt,
+  recordFeedback, shouldPromptFeedback, showFeedbackPrompt, showQueuedFeedbackPrompt
+} from '../js/feedback.js';
+import { openInstallGuide, refreshStorageBanner, storageBannerMode } from '../js/components/storage-banner.js';
+import {
+  EMPTY_APP_SEEN_KEY, markEmptyAppSeen, shouldOfferRestorePromptForCounts,
+  showBackupReminder, showRestorePrompt
+} from '../js/components/backup-prompts.js';
 import { shouldPromptUpdate, showUpdateBanner, dismissUpdateBanner, UPDATE_CHECK_INTERVAL_MS } from '../js/update.js';
 
 const TEST_DB = 'outfit-planner-test';
@@ -1381,6 +1395,154 @@ test('backup.restoreFromFile: imports a backup File and restores data into an em
   assertEq(all[0].name, 'Keep me');
 });
 
+// ----- Activation + alpha feedback -----
+test('activation.normalizeRoute + sanitizeActivationData: strips IDs and unsafe fields', () => {
+  assertEq(normalizeRoute('#/trip/abc-123/packing?x=1'), '/trip/:id/packing');
+  assertEq(normalizeRoute('#/item/new'), '/item/new');
+  const safe = sanitizeActivationData({
+    route: '#/outfit/private-id/edit',
+    source: 'activation_hero',
+    category: 'top',
+    purchaseUrl: 'https://example.com/private',
+    itemName: 'Blue shirt',
+    notes: 'Private note',
+    imageBlob: 'blob',
+    counts: { items: 2, outfits: 1, trips: 0, dayPlans: 0 }
+  });
+  assertEq(safe, {
+    route: '/outfit/:id/edit',
+    source: 'activation_hero',
+    category: 'top',
+    items: 2,
+    outfits: 1,
+    trips: 0,
+    dayPlans: 0
+  });
+});
+
+test('activation.trackActivation: stores only sanitized payload locally and for Umami', () => {
+  const prevLog = localStorage.getItem(ACTIVATION_LOG_KEY);
+  const prevUmami = window.umami;
+  const calls = [];
+  try {
+    clearActivationEvents();
+    window.umami = { track: (name, data) => calls.push({ name, data }) };
+    const event = trackActivation('Trip Created!', {
+      source: 'test',
+      tripName: 'Secret Paris',
+      purchaseUrl: 'https://example.com/private',
+      route: '#/trip/secret'
+    });
+    assertEq(event.name, 'trip_created');
+    assertEq(getActivationEvents().length, 1);
+    assertEq(getActivationEvents()[0].data, { source: 'test', route: '/trip/:id' });
+    assertEq(calls[0], { name: 'trip_created', data: { source: 'test', route: '/trip/:id' } });
+  } finally {
+    if (prevLog == null) localStorage.removeItem(ACTIVATION_LOG_KEY); else localStorage.setItem(ACTIVATION_LOG_KEY, prevLog);
+    window.umami = prevUmami;
+  }
+});
+
+test('feedback.shouldPromptFeedback: respects session, response, dismissal and cooldown', () => {
+  const now = Date.parse('2026-06-01T12:00:00.000Z');
+  assertEq(shouldPromptFeedback({ flow: 'trip_created', now }), true);
+  assertEq(shouldPromptFeedback({ flow: 'trip_created', now, sessionPrompted: true }), false);
+  assertEq(shouldPromptFeedback({
+    flow: 'trip_created',
+    now,
+    state: { flows: { trip_created: { respondedAt: '2026-06-01T11:00:00.000Z' } } }
+  }), false);
+  assertEq(shouldPromptFeedback({
+    flow: 'trip_created',
+    now,
+    state: { lastPromptAt: '2026-06-01T11:45:00.000Z', flows: {} }
+  }), false);
+  assertEq(shouldPromptFeedback({
+    flow: 'trip_created',
+    now,
+    state: { flows: { trip_created: { dismissedAt: '2026-05-31T12:00:00.000Z' } } }
+  }), false);
+});
+
+test('feedback.recordFeedback + packet: keeps comments in feedback, not activation metadata', () => {
+  const prevFeedback = localStorage.getItem(FEEDBACK_LOG_KEY);
+  const prevState = localStorage.getItem(FEEDBACK_STATE_KEY);
+  const prevActivation = localStorage.getItem(ACTIVATION_LOG_KEY);
+  try {
+    clearFeedbackEntries();
+    clearActivationEvents();
+    recordFeedback('trip_created', 'negative', 'The date picker was confusing.');
+    const packet = buildFeedbackPacket();
+    assertEq(packet.feedback.length, 1);
+    assertEq(packet.feedback[0].comment, 'The date picker was confusing.');
+    assertEq(packet.activationEvents.length, 1);
+    assertEq(packet.activationEvents[0].data, {
+      flow: 'trip_created',
+      rating: 'negative',
+      hasComment: true
+    });
+    assertTrue(!JSON.stringify(packet.activationEvents).includes('date picker'), 'activation events omit free text');
+  } finally {
+    if (prevFeedback == null) localStorage.removeItem(FEEDBACK_LOG_KEY); else localStorage.setItem(FEEDBACK_LOG_KEY, prevFeedback);
+    if (prevState == null) localStorage.removeItem(FEEDBACK_STATE_KEY); else localStorage.setItem(FEEDBACK_STATE_KEY, prevState);
+    if (prevActivation == null) localStorage.removeItem(ACTIVATION_LOG_KEY); else localStorage.setItem(ACTIVATION_LOG_KEY, prevActivation);
+  }
+});
+
+test('UI: feedback prompt can be queued, shown and answered once', () => {
+  ensureUiRoots();
+  const prevFeedback = localStorage.getItem(FEEDBACK_LOG_KEY);
+  const prevState = localStorage.getItem(FEEDBACK_STATE_KEY);
+  const prevPending = sessionStorage.getItem(FEEDBACK_PENDING_KEY);
+  const prevSession = sessionStorage.getItem(FEEDBACK_SESSION_KEY);
+  try {
+    document.getElementById('feedback-root')?.remove();
+    clearFeedbackEntries();
+    sessionStorage.removeItem(FEEDBACK_PENDING_KEY);
+    sessionStorage.removeItem(FEEDBACK_SESSION_KEY);
+    assertEq(queueFeedbackPrompt('trip_created'), true);
+    const prompt = showQueuedFeedbackPrompt();
+    assertTrue(prompt, 'prompt rendered');
+    assertTrue(/Was creating that trip easy/.test(prompt.textContent), 'flow-specific copy');
+    prompt.querySelector('button').click();
+    assertEq(getFeedbackEntries().length, 1);
+    assertEq(getFeedbackEntries()[0].rating, 'positive');
+  } finally {
+    document.getElementById('feedback-root')?.remove();
+    if (prevFeedback == null) localStorage.removeItem(FEEDBACK_LOG_KEY); else localStorage.setItem(FEEDBACK_LOG_KEY, prevFeedback);
+    if (prevState == null) localStorage.removeItem(FEEDBACK_STATE_KEY); else localStorage.setItem(FEEDBACK_STATE_KEY, prevState);
+    if (prevPending == null) sessionStorage.removeItem(FEEDBACK_PENDING_KEY); else sessionStorage.setItem(FEEDBACK_PENDING_KEY, prevPending);
+    if (prevSession == null) sessionStorage.removeItem(FEEDBACK_SESSION_KEY); else sessionStorage.setItem(FEEDBACK_SESSION_KEY, prevSession);
+  }
+});
+
+test('demo.seedDemoTrip: creates a reusable sample trip without duplicating on repeat', async () => {
+  await withTestDb();
+  const prevDemo = localStorage.getItem(DEMO_TRIP_KEY);
+  try {
+    localStorage.removeItem(DEMO_TRIP_KEY);
+    assertEq(buildDemoDates(new Date('2026-06-01T00:00:00.000Z')), {
+      startDate: '2026-06-22',
+      endDate: '2026-06-24'
+    });
+    const first = await seedDemoTrip({ baseDate: new Date('2026-06-01T00:00:00.000Z') });
+    assertEq(first.created, true);
+    assertEq((await items.all()).length, 6);
+    assertEq((await outfits.all()).length, 2);
+    assertEq((await trips.all()).length, 1);
+    assertEq((await dayPlans.byTrip(first.trip.id)).length, 3);
+    assertEq((await tripShoppingList(first.trip.id)).length, 1);
+
+    const second = await seedDemoTrip({ baseDate: new Date('2026-06-01T00:00:00.000Z') });
+    assertEq(second.created, false);
+    assertEq(second.trip.id, first.trip.id);
+    assertEq((await items.all()).length, 6);
+    assertEq((await trips.all()).length, 1);
+  } finally {
+    if (prevDemo == null) localStorage.removeItem(DEMO_TRIP_KEY); else localStorage.setItem(DEMO_TRIP_KEY, prevDemo);
+  }
+});
+
 // ----- First-run setup -----
 test('setup.buildSetupStatus: derives checklist from facts, not dismissal storage', () => {
   const prev = localStorage.getItem(SETUP_DISMISSED_KEY);
@@ -1433,9 +1595,13 @@ test('backup prompt helper: restore is offered only for blank, not-started-fresh
   const shownKey = 'outfit-planner:restorePromptShown';
   const prevStarted = localStorage.getItem(startedKey);
   const prevShown = sessionStorage.getItem(shownKey);
+  const prevEmptySeen = localStorage.getItem(EMPTY_APP_SEEN_KEY);
   try {
     localStorage.removeItem(startedKey);
+    localStorage.removeItem(EMPTY_APP_SEEN_KEY);
     sessionStorage.removeItem(shownKey);
+    assertEq(shouldOfferRestorePromptForCounts({ items: 0, outfits: 0, trips: 0, dayPlans: 0 }), false);
+    markEmptyAppSeen();
     assertEq(shouldOfferRestorePromptForCounts({ items: 0, outfits: 0, trips: 0, dayPlans: 0 }), true);
     assertEq(shouldOfferRestorePromptForCounts({ items: 1, outfits: 0, trips: 0, dayPlans: 0 }), false);
     localStorage.setItem(startedKey, '1');
@@ -1448,6 +1614,8 @@ test('backup prompt helper: restore is offered only for blank, not-started-fresh
     else localStorage.setItem(startedKey, prevStarted);
     if (prevShown == null) sessionStorage.removeItem(shownKey);
     else sessionStorage.setItem(shownKey, prevShown);
+    if (prevEmptySeen == null) localStorage.removeItem(EMPTY_APP_SEEN_KEY);
+    else localStorage.setItem(EMPTY_APP_SEEN_KEY, prevEmptySeen);
   }
 });
 
@@ -1481,6 +1649,31 @@ test('setup.buildSetupStatus: plan step waits for a real trip target', () => {
   assertEq(readyPlan.blocked, false);
   assertEq(readyPlan.href, '#/trip/trip1');
   assertEq(readyPlan.action, 'Plan');
+});
+
+test('setup.shouldShowActivationHero: only blank, non-restore setup states show the demo path', () => {
+  const empty = buildSetupStatus({ facts: {}, restorePromptPending: false });
+  const hasItem = buildSetupStatus({ facts: { itemCount: 1 }, restorePromptPending: false });
+  const restore = buildSetupStatus({ facts: {}, restorePromptPending: true });
+  assertEq(shouldShowActivationHero(empty), true);
+  assertEq(shouldShowActivationHero(hasItem), false);
+  assertEq(shouldShowActivationHero(restore), false);
+});
+
+test('UI: activation hero renders demo, own-trip and restore actions', () => {
+  let demo = 0, own = 0, restore = 0;
+  const hero = renderActivationHero({
+    onTryDemo: () => { demo++; },
+    onCreateTrip: () => { own++; },
+    onRestore: () => { restore++; }
+  });
+  assertTrue(/Try demo trip/.test(hero.textContent), 'demo CTA');
+  assertTrue(/Start my own/.test(hero.textContent), 'own-trip CTA');
+  assertTrue(/Restore backup/.test(hero.textContent), 'restore CTA');
+  [...hero.querySelectorAll('button')].find(btn => btn.textContent === 'Try demo trip').click();
+  [...hero.querySelectorAll('button')].find(btn => btn.textContent === 'Start my own').click();
+  [...hero.querySelectorAll('button')].find(btn => btn.textContent === 'Restore backup').click();
+  assertEq({ demo, own, restore }, { demo: 1, own: 1, restore: 1 });
 });
 
 test('UI: setup card renders checklist actions and dismissal affordance', () => {
@@ -1561,6 +1754,38 @@ function ensureViewRoot() {
   if (!root) { root = document.createElement('main'); root.id = 'view-root'; document.body.appendChild(root); }
   return root;
 }
+
+test('UI: trips empty view leads with demo activation hero', async () => {
+  ensureUiRoots();
+  ensureViewRoot();
+  const prevSetup = localStorage.getItem(SETUP_DISMISSED_KEY);
+  const prevEmptySeen = localStorage.getItem(EMPTY_APP_SEEN_KEY);
+  const prevActivation = localStorage.getItem(ACTIVATION_LOG_KEY);
+  const onceKey = 'outfit-planner:activationOnce:first_run_viewed';
+  const prevOnce = sessionStorage.getItem(onceKey);
+  try {
+    resetSetupDismissal();
+    localStorage.removeItem(EMPTY_APP_SEEN_KEY);
+    clearActivationEvents();
+    sessionStorage.removeItem(onceKey);
+    await withTestDb();
+    const { view: tripsView } = await import('../js/views/trips.js');
+    const result = await tripsView();
+    const text = result.node.textContent || '';
+    assertTrue(/See a planned trip in one tap/.test(text), 'activation hero headline');
+    assertTrue(/Try demo trip/.test(text), 'demo CTA');
+    assertTrue(!/No trips yet/.test(text), 'does not duplicate the blank empty state');
+  } finally {
+    if (prevSetup == null) localStorage.removeItem(SETUP_DISMISSED_KEY);
+    else localStorage.setItem(SETUP_DISMISSED_KEY, prevSetup);
+    if (prevEmptySeen == null) localStorage.removeItem(EMPTY_APP_SEEN_KEY);
+    else localStorage.setItem(EMPTY_APP_SEEN_KEY, prevEmptySeen);
+    if (prevActivation == null) localStorage.removeItem(ACTIVATION_LOG_KEY);
+    else localStorage.setItem(ACTIVATION_LOG_KEY, prevActivation);
+    if (prevOnce == null) sessionStorage.removeItem(onceKey);
+    else sessionStorage.setItem(onceKey, prevOnce);
+  }
+});
 
 test('UI: setup card avoids a duplicate empty-trip create button', async () => {
   ensureUiRoots();
@@ -1830,8 +2055,17 @@ test('UI: trip packing view omits optional to-buy section without rendering null
   }
 });
 
-test('UI: storage banner reflects protection state (shown + tappable when unprotected)', async () => {
+test('storageBannerMode: hides for protected or empty data, warns once data exists', () => {
+  assertEq(storageBannerMode({ protected: true, counts: { items: 1, outfits: 0, trips: 0, dayPlans: 0 } }), 'hidden');
+  assertEq(storageBannerMode({ protected: false, counts: { items: 0, outfits: 0, trips: 0, dayPlans: 0 } }), 'hidden');
+  assertEq(storageBannerMode({ protected: false, counts: { items: 1, outfits: 0, trips: 0, dayPlans: 0 } }), 'strong');
+  assertEq(storageBannerMode({ protected: false, counts: null }), 'strong');
+});
+
+test('UI: storage banner reflects protection state for non-empty data', async () => {
   ensureUiRoots();
+  await withTestDb();
+  await items.put({ name: 'Travel tee', category: 'top', owned: true });
   const { main, banner } = setupShellDom();
   // Best-effort force "unprotected" so the shown-branch is deterministic.
   const orig = (navigator.storage && navigator.storage.persisted) || null;
@@ -1863,6 +2097,31 @@ test('UI: openInstallGuide opens a sheet with Add-to-Home-Screen / install guida
   assertTrue(dlg, 'a sheet opened');
   assertTrue(/Home Screen|Install app/.test(dlg.textContent || ''), 'mentions the install path');
   closeAllSheets();
+});
+
+test('UI: settings view exposes local alpha feedback packet controls', async () => {
+  ensureUiRoots();
+  ensureViewRoot();
+  await withTestDb();
+  const prevFeedback = localStorage.getItem(FEEDBACK_LOG_KEY);
+  const prevState = localStorage.getItem(FEEDBACK_STATE_KEY);
+  const prevActivation = localStorage.getItem(ACTIVATION_LOG_KEY);
+  try {
+    clearFeedbackEntries();
+    clearActivationEvents();
+    recordFeedback('trip_created', 'positive');
+    const { view: settingsView } = await import('../js/views/settings.js');
+    const result = await settingsView();
+    const text = result.node.textContent || '';
+    assertTrue(/Alpha feedback/.test(text), 'section heading');
+    assertTrue(/Copy feedback packet/.test(text), 'copy row');
+    assertTrue(/1 response/.test(text), 'feedback count');
+    assertTrue(/1 event/.test(text), 'activation event count');
+  } finally {
+    if (prevFeedback == null) localStorage.removeItem(FEEDBACK_LOG_KEY); else localStorage.setItem(FEEDBACK_LOG_KEY, prevFeedback);
+    if (prevState == null) localStorage.removeItem(FEEDBACK_STATE_KEY); else localStorage.setItem(FEEDBACK_STATE_KEY, prevState);
+    if (prevActivation == null) localStorage.removeItem(ACTIVATION_LOG_KEY); else localStorage.setItem(ACTIVATION_LOG_KEY, prevActivation);
+  }
 });
 
 test('UI: showBackupReminder opens a sheet with "Back up now" and "Later"', () => {

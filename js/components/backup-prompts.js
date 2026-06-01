@@ -13,6 +13,7 @@ import {
 
 const STARTED_FRESH_KEY = 'outfit-planner:startedFresh';
 const RESTORE_SHOWN_SESSION = 'outfit-planner:restorePromptShown';
+export const EMPTY_APP_SEEN_KEY = 'outfit-planner:emptyAppSeen';
 
 // Run the right prompt for the current state. Call once after boot.
 export async function runBackupPrompts() {
@@ -20,7 +21,9 @@ export async function runBackupPrompts() {
   try { counts = await getCounts(); } catch { return; }
 
   if (isEmptyCounts(counts)) {
-    await maybePromptRestore();
+    const seenEmptyBefore = hasSeenEmptyApp();
+    markEmptyAppSeen();
+    if (seenEmptyBefore) await maybePromptRestore();
     return;
   }
   await maybePromptBackupReminder(counts);
@@ -39,10 +42,19 @@ async function maybePromptRestore() {
 
 export function shouldOfferRestorePromptForCounts(counts) {
   if (!isEmptyCounts(counts)) return false;
+  if (!hasSeenEmptyApp()) return false;
   let startedFresh = false, shownThisSession = false;
   try { startedFresh = localStorage.getItem(STARTED_FRESH_KEY) === '1'; } catch {}
   try { shownThisSession = sessionStorage.getItem(RESTORE_SHOWN_SESSION) === '1'; } catch {}
   return !startedFresh && !shownThisSession;
+}
+
+export function hasSeenEmptyApp() {
+  try { return localStorage.getItem(EMPTY_APP_SEEN_KEY) === '1'; } catch { return false; }
+}
+
+export function markEmptyAppSeen() {
+  try { localStorage.setItem(EMPTY_APP_SEEN_KEY, '1'); } catch {}
 }
 
 export async function showRestorePrompt() {

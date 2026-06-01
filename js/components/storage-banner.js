@@ -1,8 +1,8 @@
-// Always-visible warning bar: tells the user their data can be evicted until
-// the app is installed to the Home Screen, and is itself the call-to-action.
+// Data-at-risk warning bar: once the user has data, tells them it can be
+// evicted until the app is installed to the Home Screen.
 //
 // HCI notes:
-//  • Visibility of system status — the bar is shown on every page, persistently,
+//  • Visibility of system status — the bar is shown on every page with data,
 //    so the risk is never hidden behind a settings screen.
 //  • Strong affordance — it's a full-width red button with a warning icon, clear
 //    label, and a chevron, so it obviously looks tappable.
@@ -13,6 +13,7 @@
 
 import { el, sheet } from '../ui.js';
 import { isStorageProtected, isIOS } from '../storage.js';
+import { getCounts, isEmptyCounts } from '../backup.js';
 
 // Captured Chromium install prompt, if the browser offers one.
 let deferredInstallPrompt = null;
@@ -33,8 +34,17 @@ export async function refreshStorageBanner() {
   if (!banner) return;
   let prot = false;
   try { prot = await isStorageProtected(); } catch {}
-  if (prot) hideBanner(banner);
+  let counts = null;
+  try { counts = await getCounts(); } catch {}
+  const mode = storageBannerMode({ protected: prot, counts });
+  if (mode === 'hidden') hideBanner(banner);
   else showBanner(banner);
+}
+
+export function storageBannerMode({ protected: isProtected = false, counts = null } = {}) {
+  if (isProtected) return 'hidden';
+  if (counts && isEmptyCounts(counts)) return 'hidden';
+  return 'strong';
 }
 
 function hideBanner(banner) {
