@@ -3,6 +3,7 @@
 import { openDB } from '../js/vendor/idb.js';
 import { match, register } from '../js/router.js';
 import { el, backControl } from '../js/ui.js';
+import { renderNav } from '../js/components/nav.js';
 import {
   TAG_LIMITS, availableTags, filterItems, itemMatchesQuery, normalizeTags, outfitMatchesQuery
 } from '../js/search.js';
@@ -150,6 +151,22 @@ test('ui.backControl: renders a real <button> (history-aware), not a hardcoded l
   assertEq(b.tagName, 'BUTTON');
   assertEq(b.getAttribute('aria-label'), 'Back');
   assertTrue(!b.getAttribute('href'), 'must not be an anchor with a fixed href');
+});
+
+test('nav.renderNav: renders modern SVG tab icons and preserves active state', () => {
+  const tabbar = el('nav', { id: 'tabbar' });
+  const sidebar = el('nav', { id: 'sidebar-nav' });
+  document.body.append(tabbar, sidebar);
+  try {
+    renderNav('#/items?filter=top');
+    assertEq(tabbar.querySelectorAll('.nav-icon svg').length, 5);
+    assertEq(sidebar.querySelectorAll('.nav-icon svg').length, 5);
+    assertEq(tabbar.querySelector('[aria-current="page"] .tab-label').textContent, 'Items');
+    assertTrue(!tabbar.querySelector('.tab-icon'), 'old emoji tab icon class should not render');
+  } finally {
+    tabbar.remove();
+    sidebar.remove();
+  }
 });
 
 test('daysBetween: inclusive range', () => {
@@ -1115,9 +1132,9 @@ test('share.renderOutfitsCanvas: single outfit produces a 1080px-wide non-blank 
   const canvas = await renderOutfitsCanvas([outfit], itemsById);
   assertEq(canvas.width, 1080);
   assertTrue(canvas.height > 400, 'canvas tall enough for title + 2 items');
-  // Sample a top-left background pixel — should match the section bg color #fafafa
+  // Sample a top-left background pixel — should match the section bg color #f7f8fb
   const px = canvas.getContext('2d').getImageData(0, 0, 1, 1).data;
-  assertEq(Array.from(px).slice(0, 3), [250, 250, 250]);
+  assertEq(Array.from(px).slice(0, 3), [247, 248, 251]);
   assertEq(px[3], 255); // opaque, never transparent
 });
 
