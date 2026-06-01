@@ -19,14 +19,15 @@ const FOOTER_H = 64;
 const CARD_RADIUS = 18;
 
 const PALETTE = {
-  bg: '#fafafa',
+  bg: '#f7f8fb',
   surface: '#ffffff',
-  border: '#e5e7eb',
-  text: '#111111',
-  textMuted: '#6b7280',
-  accent: '#2563eb',
-  owned: '#16a34a',
-  toBuy: '#d97706',
+  surface2: '#f1f4f3',
+  border: '#dce4e1',
+  text: '#151716',
+  textMuted: '#66716d',
+  accent: '#0f766e',
+  owned: '#118454',
+  toBuy: '#b65f00',
   white: '#ffffff'
 };
 
@@ -174,7 +175,7 @@ function drawSection(ctx, outfit, plan, originY, index, total) {
       ctx.drawImage(slot.bitmap, imgX, imgY, slot.imgW, slot.imgH);
       ctx.restore();
     } else {
-      ctx.fillStyle = '#eeeeee';
+      ctx.fillStyle = PALETTE.surface2;
       roundedRect(ctx, imgX, imgY, slot.imgW, slot.imgH, 12);
       ctx.fill();
       ctx.fillStyle = PALETTE.textMuted;

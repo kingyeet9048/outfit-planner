@@ -28,7 +28,7 @@ Open `index.html` directly via `file://` will NOT work — browsers block JavaSc
 
 Either script tries `python -m http.server`, then falls back to `npx serve`. Then open <http://127.0.0.1:5173/>.
 
-To run the test suite, open <http://127.0.0.1:5173/tests/test.html> — it runs automatically and reports pass/fail counts inline. There are 100 tests covering pure logic (UUID, routing + query parsing, date helpers, blob ↔ base64 roundtrip, backup-reminder timing, empty-DB detection, retailer grouping, update-prompt logic), IndexedDB integration (CRUD, cascade deletes, shopping list, export/import, restore-from-file), and UI smoke tests (storage warning bar, install guide, backup/restore prompts, update banner, history-aware back control).
+To run the test suite, open <http://127.0.0.1:5173/tests/test.html> — it runs automatically and reports pass/fail counts inline. There are over 100 tests covering pure logic (UUID, routing + query parsing, date helpers, blob ↔ base64 roundtrip, backup-reminder timing, empty-DB detection, retailer grouping, update-prompt logic), IndexedDB integration (CRUD, cascade deletes, shopping list, export/import, restore-from-file), and UI smoke tests (storage warning bar, install guide, backup/restore prompts, update banner, modern navigation, history-aware back control).
 
 ## Deploying to GitHub Pages
 
