@@ -743,15 +743,45 @@ body {
 .outfit-stack.lg .stack-slot { height: 110px; font-size: 32px; }
 
 /* trip planner rows and outfit picker previews */
-.outfit-stack.trip { width: 112px; flex: 0 0 112px; }
-.outfit-stack.trip .stack-accessories { gap: 5px; }
-.outfit-stack.trip .stack-accessories .stack-mini { width: 26px; height: 26px; border-radius: 6px; overflow: hidden; background: var(--surface-2); position: relative; }
-.outfit-stack.trip .stack-accessories .stack-mini img { width: 100%; height: 100%; object-fit: cover; }
-.outfit-stack.trip .stack-slot { width: 112px; height: 52px; font-size: 22px; }
+.outfit-stack.trip {
+  width: 88px;
+  max-width: 88px;
+  flex: 0 0 88px;
+  min-width: 0;
+  overflow: hidden;
+}
+.outfit-stack.trip .stack-accessories { gap: 4px; max-width: 88px; }
+.outfit-stack.trip .stack-accessories .stack-mini {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--surface-2);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.outfit-stack.trip .stack-accessories .stack-mini img,
+.outfit-stack.trip .stack-slot img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.outfit-stack.trip .stack-slot {
+  width: 88px;
+  max-width: 88px;
+  height: 40px;
+  flex: 0 0 auto;
+  font-size: 20px;
+}
 .outfit-stack.trip.is-single-item .stack-accessories .stack-mini,
 .outfit-stack.trip.is-single-item .stack-slot {
-  width: 112px;
-  height: 112px;
+  width: 88px;
+  height: 88px;
 }
 
 /* ---------- Day row in trip detail ---------- */
