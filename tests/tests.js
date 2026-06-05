@@ -51,6 +51,12 @@ import {
   showBackupReminder, showRestorePrompt
 } from '../js/components/backup-prompts.js';
 import { shouldPromptUpdate, showUpdateBanner, dismissUpdateBanner, UPDATE_CHECK_INTERVAL_MS } from '../js/update.js';
+import {
+  clearItemCreateContinuation,
+  clearOutfitCreateContinuation,
+  peekOutfitCreateContinuation,
+  startOutfitCreateContinuation
+} from '../js/continuations.js';
 
 const TEST_DB = 'outfit-planner-test';
 
@@ -1969,6 +1975,146 @@ test('UI: item picker can combine pants and skirts for the bottom slot', async (
   assertEq(names, ['Pleated Skirt', 'Travel Pants']);
   dlg.querySelector('.sheet-header .icon-btn').click();
   assertEq(await pickerPromise, undefined);
+});
+
+test('UI: creating an item from outfit edit returns to the draft slot', async () => {
+  ensureUiRoots();
+  closeAllSheets();
+  clearItemCreateContinuation();
+  clearOutfitCreateContinuation();
+  const root = ensureViewRoot();
+  await withTestDb();
+  const { view: outfitEditorView } = await import('../js/views/outfit-editor.js');
+  const { view: itemEditorView } = await import('../js/views/item-editor.js');
+
+  history.replaceState({ navId: 'test-outfits', idx: 0 }, '', '#/outfits');
+  location.hash = '#/outfit/new';
+  await wait(20);
+  history.replaceState({ navId: 'test-outfit-new', idx: 1 }, '', '#/outfit/new');
+  let outfitResult = await outfitEditorView({ id: 'new' });
+  root.replaceChildren(outfitResult.node);
+  const outfitName = root.querySelector('input[placeholder="e.g., Linen Casual"]');
+  outfitName.value = 'Dress travel look';
+  outfitName.dispatchEvent(new Event('input', { bubbles: true }));
+  const dressSection = [...root.querySelectorAll('.slot-section')]
+    .find(section => /^Dresses$/.test(section.querySelector('h3')?.textContent || ''));
+  assertTrue(dressSection, 'dress section rendered');
+  const addDress = dressSection.querySelector('.acc-add');
+  assertTrue(addDress, 'dress section has an add control');
+  addDress.click();
+  await wait(80);
+  let dlg = currentSheet();
+  assertTrue(dlg, 'dress picker opened');
+  dlg.querySelector('a[href="#/item/new"]').click();
+  await wait(80);
+  history.replaceState({ navId: 'test-item-new', idx: 2 }, '', '#/item/new');
+
+  outfitResult.cleanup?.();
+  let itemResult = await itemEditorView({ id: 'new' });
+  root.replaceChildren(itemResult.node);
+  assertEq(root.querySelector('button[data-category-value="dress"]').getAttribute('aria-pressed'), 'true');
+  const itemName = root.querySelector('input[placeholder="e.g., Linen Shirt"]');
+  itemName.value = 'Trip dress';
+  itemName.dispatchEvent(new Event('input', { bubbles: true }));
+  root.querySelector('button[type="submit"]').click();
+  await wait(180);
+  assertEq(location.hash, '#/outfit/new');
+
+  itemResult.cleanup?.();
+  outfitResult = await outfitEditorView({ id: 'new' });
+  root.replaceChildren(outfitResult.node);
+  assertEq(root.querySelector('input[placeholder="e.g., Linen Casual"]').value, 'Dress travel look');
+  assertTrue(/Trip dress/.test(root.textContent || ''), 'new dress is placed in the dress slot');
+  history.back();
+  await wait(120);
+  assertTrue(location.hash !== '#/item/new', 'browser Back skips the temporary new item route');
+  outfitResult.cleanup?.();
+});
+
+test('UI: creating an outfit from a trip day assigns it after save', async () => {
+  ensureUiRoots();
+  closeAllSheets();
+  clearItemCreateContinuation();
+  clearOutfitCreateContinuation();
+  const root = ensureViewRoot();
+  await withTestDb();
+  const trip = await trips.put({ name: 'Weekend', startDate: '2026-07-01', endDate: '2026-07-01' });
+  const { view: tripDetailView } = await import('../js/views/trip-detail.js');
+  const { view: outfitEditorView } = await import('../js/views/outfit-editor.js');
+
+  history.replaceState({ navId: 'test-trip-detail', idx: 0 }, '', `#/trip/${trip.id}`);
+  const tripResult = await tripDetailView({ id: trip.id });
+  root.replaceChildren(tripResult.node);
+  const choose = [...root.querySelectorAll('button')].find(btn => btn.textContent.trim() === '+ Choose outfit');
+  assertTrue(choose, 'trip day has a choose outfit action');
+  choose.click();
+  await wait(80);
+  const dlg = currentSheet();
+  assertTrue(dlg, 'outfit picker opened');
+  dlg.querySelector('a[href="#/outfit/new"]').click();
+  await wait(80);
+  assertEq(location.hash, '#/outfit/new');
+  assertEq(peekOutfitCreateContinuation()?.tripId, trip.id, 'trip continuation is stored before outfit save');
+
+  tripResult.cleanup?.();
+  const outfitResult = await outfitEditorView({ id: 'new' });
+  root.replaceChildren(outfitResult.node);
+  assertEq(peekOutfitCreateContinuation()?.tripId, trip.id, 'trip continuation survives outfit editor render');
+  const name = root.querySelector('input[placeholder="e.g., Linen Casual"]');
+  name.value = 'Created from trip';
+  name.dispatchEvent(new Event('input', { bubbles: true }));
+  root.querySelector('button[type="submit"]').click();
+  await wait(150);
+
+  const plan = await dayPlans.get(trip.id, '2026-07-01');
+  assertTrue(plan, 'day plan was created');
+  assertEq(plan.outfitIds.length, 1);
+  const saved = await outfits.get(plan.outfitIds[0]);
+  assertEq(saved.name, 'Created from trip');
+  assertEq(location.hash, `#/trip/${trip.id}`);
+  outfitResult.cleanup?.();
+});
+
+test('UI: outfit create continuation replaces the exact trip day spot', async () => {
+  ensureUiRoots();
+  closeAllSheets();
+  clearItemCreateContinuation();
+  clearOutfitCreateContinuation();
+  const root = ensureViewRoot();
+  await withTestDb();
+  const trip = await trips.put({ name: 'Weekend', startDate: '2026-07-01', endDate: '2026-07-01' });
+  const first = await outfits.put({ name: 'First outfit' });
+  const second = await outfits.put({ name: 'Second outfit' });
+  await dayPlans.setOutfits(trip.id, '2026-07-01', [first.id, second.id]);
+  startOutfitCreateContinuation({
+    returnHash: `#/trip/${trip.id}`,
+    tripId: trip.id,
+    date: '2026-07-01',
+    mode: 'replace',
+    index: 1
+  });
+
+  history.replaceState({ navId: 'test-outfit-replace', idx: 0 }, '', '#/outfit/new');
+  const { view: outfitEditorView } = await import('../js/views/outfit-editor.js');
+  assertEq(peekOutfitCreateContinuation()?.index, 1, 'replace continuation is stored before render');
+  const result = await outfitEditorView({ id: 'new' });
+  root.replaceChildren(result.node);
+  assertEq(peekOutfitCreateContinuation()?.index, 1, 'replace continuation survives outfit editor render');
+  const name = root.querySelector('input[placeholder="e.g., Linen Casual"]');
+  name.value = 'Replacement outfit';
+  name.dispatchEvent(new Event('input', { bubbles: true }));
+  root.querySelector('button[type="submit"]').click();
+  await wait(150);
+
+  const plan = await dayPlans.get(trip.id, '2026-07-01');
+  assertEq(plan.outfitIds.length, 2);
+  assertEq(plan.outfitIds[0], first.id);
+  assertTrue(plan.outfitIds[1] !== second.id, 'second spot was replaced');
+  const replacement = await outfits.get(plan.outfitIds[1]);
+  assertEq(replacement.name, 'Replacement outfit');
+  assertEq(location.hash, `#/trip/${trip.id}`);
+  result.cleanup?.();
+  clearOutfitCreateContinuation();
 });
 
 test('UI: outfit picker search matches notes and contained item tags', async () => {

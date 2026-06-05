@@ -8,6 +8,7 @@ import { deriveTripPacking } from '../packing.js';
 import { trackActivation, trackActivationOnce } from '../activation.js';
 import { queueFeedbackPrompt, showQueuedFeedbackPrompt } from '../feedback.js';
 import { categoryIcon, categoryLabel } from '../categories.js';
+import { startOutfitCreateContinuation } from '../continuations.js';
 
 // Deterministic, recognizable color for a store avatar (same store → same hue
 // across renders). Mid-tone lightness so white text stays legible in both themes.
@@ -252,11 +253,22 @@ export async function view({ id }) {
 
   // Pick an outfit and ADD it to the day (extra entry).
   async function addOutfitToDay(dateIso, data) {
+    let creatingOutfit = false;
     const result = await pickOutfit({
       currentId: null,
       allowClear: false,
-      reuseContext: pickerReuseContext(dateIso, data)
+      reuseContext: pickerReuseContext(dateIso, data),
+      onCreate: () => {
+        creatingOutfit = true;
+        startOutfitCreateContinuation({
+          returnHash: `#/trip/${id}`,
+          tripId: id,
+          date: dateIso,
+          mode: 'add'
+        });
+      }
     });
+    if (creatingOutfit) return;
     if (typeof result !== 'string') { await renderAll(); return; }
     if (targetOutfitIds(data, dateIso).includes(result)) {
       toast('That day already has this outfit');
@@ -273,10 +285,22 @@ export async function view({ id }) {
 
   // Tap an existing outfit on a day to replace or remove it.
   async function replaceOutfitOnDay(dateIso, idx, currentId, data) {
+    let creatingOutfit = false;
     const result = await pickOutfit({
       currentId,
-      reuseContext: pickerReuseContext(dateIso, data, currentId)
+      reuseContext: pickerReuseContext(dateIso, data, currentId),
+      onCreate: () => {
+        creatingOutfit = true;
+        startOutfitCreateContinuation({
+          returnHash: `#/trip/${id}`,
+          tripId: id,
+          date: dateIso,
+          mode: 'replace',
+          index: idx
+        });
+      }
     });
+    if (creatingOutfit) return;
     if (result === undefined) { await renderAll(); return; }
     const existing = await dayPlans.get(id, dateIso);
     const list = existing ? [...(existing.outfitIds || [])] : [];

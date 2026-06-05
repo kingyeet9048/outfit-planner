@@ -1,11 +1,18 @@
 import { el, renderTopbar, toast, confirm, backControl } from '../ui.js';
 import { back } from '../router.js';
-import { items as itemsStore, outfits as outfitsStore } from '../store.js';
+import { dayPlans, items as itemsStore, outfits as outfitsStore } from '../store.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
 import { pickItem } from '../components/picker.js';
 import { trackActivation } from '../activation.js';
 import { queueFeedbackPrompt } from '../feedback.js';
 import { categoryIcon } from '../categories.js';
+import {
+  clearOutfitCreateContinuation,
+  peekOutfitCreateContinuation,
+  startItemCreateContinuation,
+  takeItemCreateContinuationFor,
+  takeOutfitCreateContinuation
+} from '../continuations.js';
 
 export async function view({ id }) {
   const OWNER = 'outfit-editor';
@@ -18,6 +25,9 @@ export async function view({ id }) {
     return { node: el('div', { class: 'state' }, [el('h3', null, 'Outfit not found')]) };
   }
 
+  const itemContinuation = takeItemCreateContinuationFor(location.hash);
+  const draft = itemContinuation?.draft;
+
   const state = {
     name: existing?.name || '',
     topId: existing?.topId || null,
@@ -28,6 +38,8 @@ export async function view({ id }) {
     notes: existing?.notes || '',
     dirty: false
   };
+  applyDraft(state, draft);
+  applyCreatedItem(state, itemContinuation);
 
   let itemsCache = await itemsStore.all();
   const refreshItemsCache = async () => { itemsCache = await itemsStore.all(); };
@@ -37,12 +49,18 @@ export async function view({ id }) {
   const backBtn = el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Back', onClick: tryLeave }, '◀');
   renderTopbar({ title: isNew ? 'New outfit' : 'Edit outfit', left: backBtn, right: saveBtn });
 
-  const exitHash = existing ? `#/outfit/${existing.id}` : '#/outfits';
+  const pendingOutfitContinuation = isNew ? peekOutfitCreateContinuation() : null;
+  const exitHash = pendingOutfitContinuation?.returnHash || (existing ? `#/outfit/${existing.id}` : '#/outfits');
 
   async function tryLeave() {
     if (state.dirty) {
       const ok = await confirm({ title: 'Discard changes?', message: 'You have unsaved changes.', confirmLabel: 'Discard', danger: true });
       if (!ok) return;
+    }
+    if (pendingOutfitContinuation) {
+      clearOutfitCreateContinuation();
+      back(exitHash);
+      return;
     }
     back(exitHash);
   }
@@ -128,7 +146,17 @@ export async function view({ id }) {
     }
 
     async function openPicker() {
-      const result = await pickItem({ category: categories, currentId: state[stateKey], ownerKey: OWNER });
+      const result = await pickItem({
+        category: categories,
+        currentId: state[stateKey],
+        ownerKey: OWNER,
+        onCreate: () => startItemCreateContinuation({
+          returnHash: location.hash,
+          draft: outfitDraft(state),
+          target: { type: 'single', stateKey },
+          defaultCategory: categories[0]
+        })
+      });
       if (result === undefined) {
         // dismissed without choice; if user navigated to /item/new, refresh on return
         await refreshItemsCache();
@@ -180,7 +208,18 @@ export async function view({ id }) {
     }
 
     async function openPickerForAdd() {
-      const result = await pickItem({ category, currentId: null, allowClear: false, ownerKey: OWNER });
+      const result = await pickItem({
+        category,
+        currentId: null,
+        allowClear: false,
+        ownerKey: OWNER,
+        onCreate: () => startItemCreateContinuation({
+          returnHash: location.hash,
+          draft: outfitDraft(state),
+          target: { type: 'multi', stateKey, mode: 'add' },
+          defaultCategory: category
+        })
+      });
       if (typeof result !== 'string') { await refreshItemsCache(); redraw(); return; }
       if (!state[stateKey].includes(result)) {
         state[stateKey].push(result);
@@ -190,7 +229,18 @@ export async function view({ id }) {
       redraw();
     }
     async function openPickerForReplace(idx) {
-      const result = await pickItem({ category, currentId: state[stateKey][idx], allowClear: true, ownerKey: OWNER });
+      const result = await pickItem({
+        category,
+        currentId: state[stateKey][idx],
+        allowClear: true,
+        ownerKey: OWNER,
+        onCreate: () => startItemCreateContinuation({
+          returnHash: location.hash,
+          draft: outfitDraft(state),
+          target: { type: 'multi', stateKey, mode: 'replace', index: idx },
+          defaultCategory: category
+        })
+      });
       if (result === undefined) { await refreshItemsCache(); redraw(); return; }
       if (result === null) state[stateKey].splice(idx, 1);
       else state[stateKey][idx] = result;
@@ -219,12 +269,21 @@ export async function view({ id }) {
         otherIds: state.otherIds,
         notes: state.notes.trim()
       });
-      toast(isNew ? 'Outfit created' : 'Outfit saved', { kind: 'success' });
       const slotCount = [state.topId, state.pantId, state.shoesId, ...state.accessoryIds, ...state.otherIds]
         .filter(Boolean).length;
       trackActivation(isNew ? 'outfit_created' : 'outfit_saved', { slotCount });
       if (isNew) queueFeedbackPrompt('outfit_created', { slotCount });
       state.dirty = false;
+      const continuation = takeOutfitCreateContinuation();
+      if (continuation && continuation.tripId && continuation.date) {
+        await applyOutfitToTrip(continuation, saved.id);
+        toast('Outfit added to trip', { kind: 'success' });
+        trackActivation('day_planned', { source: 'outfit_create_continuation' });
+        queueFeedbackPrompt('day_planned');
+        back(continuation.returnHash || `#/trip/${continuation.tripId}`);
+        return;
+      }
+      toast(isNew ? 'Outfit created' : 'Outfit saved', { kind: 'success' });
       location.hash = `#/outfit/${saved.id}`;
     } catch (err) {
       toast('Save failed: ' + err.message, { kind: 'danger' });
@@ -234,4 +293,57 @@ export async function view({ id }) {
   }
 
   return { node: root, cleanup: () => releaseOwner(OWNER) };
+}
+
+function outfitDraft(state) {
+  return {
+    name: state.name || '',
+    topId: state.topId || null,
+    pantId: state.pantId || null,
+    shoesId: state.shoesId || null,
+    accessoryIds: Array.isArray(state.accessoryIds) ? state.accessoryIds.slice() : [],
+    otherIds: Array.isArray(state.otherIds) ? state.otherIds.slice() : [],
+    notes: state.notes || ''
+  };
+}
+
+function applyDraft(state, draft) {
+  if (!draft || typeof draft !== 'object') return;
+  state.name = draft.name || '';
+  state.topId = draft.topId || null;
+  state.pantId = draft.pantId || null;
+  state.shoesId = draft.shoesId || null;
+  state.accessoryIds = Array.isArray(draft.accessoryIds) ? draft.accessoryIds.slice() : [];
+  state.otherIds = Array.isArray(draft.otherIds) ? draft.otherIds.slice() : [];
+  state.notes = draft.notes || '';
+  state.dirty = true;
+}
+
+function applyCreatedItem(state, continuation) {
+  const itemId = continuation?.itemId;
+  const target = continuation?.target;
+  if (!itemId || !target) return;
+  if (target.type === 'single' && target.stateKey) {
+    state[target.stateKey] = itemId;
+    state.dirty = true;
+    return;
+  }
+  if (target.type !== 'multi' || !target.stateKey || !Array.isArray(state[target.stateKey])) return;
+  if (target.mode === 'replace' && Number.isInteger(target.index) && target.index >= 0) {
+    state[target.stateKey][target.index] = itemId;
+  } else if (!state[target.stateKey].includes(itemId)) {
+    state[target.stateKey].push(itemId);
+  }
+  state.dirty = true;
+}
+
+async function applyOutfitToTrip(continuation, outfitId) {
+  if (continuation.mode === 'replace' && Number.isInteger(continuation.index)) {
+    const existing = await dayPlans.get(continuation.tripId, continuation.date);
+    const list = existing ? [...(existing.outfitIds || [])] : [];
+    list[continuation.index] = outfitId;
+    await dayPlans.setOutfits(continuation.tripId, continuation.date, list, existing ? existing.notes : '');
+    return;
+  }
+  await dayPlans.addOutfit(continuation.tripId, continuation.date, outfitId);
 }
