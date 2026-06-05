@@ -5,9 +5,7 @@
 // each garment full-length without thumbnail cropping. The final PNG is lossless.
 
 import { hasBytes } from './image.js';
-
-const CATEGORY_LABELS = { top: 'Top', pant: 'Pant', shoes: 'Shoes', accessory: 'Accessory', other: 'Other' };
-const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨', other: '🎒' };
+import { categoryIcon, categoryLabel } from './categories.js';
 
 const W = 1080;
 const PAD = 40;
@@ -37,23 +35,28 @@ function topDownItemSlots(outfit, itemsById) {
   const out = [];
   for (const id of (outfit.accessoryIds || [])) {
     const it = itemsById.get(id);
-    if (it) out.push({ item: it, slotLabel: 'Accessory' });
+    if (it) out.push({ item: it, slotLabel: categoryLabel(it.category, { fallback: 'Accessory' }) });
+  }
+  const otherItems = (outfit.otherIds || [])
+    .map(id => itemsById.get(id))
+    .filter(Boolean);
+  for (const it of otherItems.filter(item => item.category === 'dress')) {
+    out.push({ item: it, slotLabel: 'Dress' });
   }
   if (outfit.topId) {
     const it = itemsById.get(outfit.topId);
-    if (it) out.push({ item: it, slotLabel: 'Top' });
+    if (it) out.push({ item: it, slotLabel: categoryLabel(it.category, { fallback: 'Top' }) });
   }
   if (outfit.pantId) {
     const it = itemsById.get(outfit.pantId);
-    if (it) out.push({ item: it, slotLabel: 'Pant' });
+    if (it) out.push({ item: it, slotLabel: categoryLabel(it.category, { fallback: 'Pant' }) });
   }
   if (outfit.shoesId) {
     const it = itemsById.get(outfit.shoesId);
-    if (it) out.push({ item: it, slotLabel: 'Shoes' });
+    if (it) out.push({ item: it, slotLabel: categoryLabel(it.category, { fallback: 'Shoes' }) });
   }
-  for (const id of (outfit.otherIds || [])) {
-    const it = itemsById.get(id);
-    if (it) out.push({ item: it, slotLabel: 'Other' });
+  for (const it of otherItems.filter(item => item.category !== 'dress')) {
+    out.push({ item: it, slotLabel: categoryLabel(it.category, { fallback: 'Other' }) });
   }
   return out;
 }
@@ -182,7 +185,7 @@ function drawSection(ctx, outfit, plan, originY, index, total) {
       ctx.font = `64px ${FONT}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(CATEGORY_ICONS[slot.item.category] || '👕', imgX + slot.imgW / 2, imgY + slot.imgH / 2);
+      ctx.fillText(categoryIcon(slot.item.category), imgX + slot.imgW / 2, imgY + slot.imgH / 2);
       ctx.textBaseline = 'top';
       ctx.textAlign = 'left';
     }
@@ -198,7 +201,7 @@ function drawSection(ctx, outfit, plan, originY, index, total) {
     // Subtitle: slot · subcategory
     ctx.fillStyle = PALETTE.textMuted;
     ctx.font = `400 20px ${FONT}`;
-    const catLabel = CATEGORY_LABELS[slot.item.category] || slot.item.category || slot.slotLabel;
+    const catLabel = categoryLabel(slot.item.category, { fallback: slot.slotLabel });
     const sub = slot.item.subcategory ? `${catLabel} · ${slot.item.subcategory}` : catLabel;
     ctx.fillText(sub, cardX + 24, labelY + 34, nameMaxW);
 

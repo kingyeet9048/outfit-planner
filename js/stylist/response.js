@@ -151,15 +151,15 @@ export function generateOutfitName(meta) {
 // Greeting / clarifier replies for misc states
 export function greetingMessage(itemCount, outfitCount) {
   if (itemCount === 0) {
-    return `Hey — I'm your local stylist, running entirely in your browser. Add a few items first (tops, pants, shoes, accessories) and I'll pull together outfits using color theory, formality matching, and category rules. Tap **Items → +** to start.`;
+    return `Hey — I'm your local stylist, running entirely in your browser. Add a few items first (tops or dresses, bottoms, shoes, accessories) and I'll pull together outfits using color theory, formality matching, and category rules. Tap **Items → +** to start.`;
   }
   return `I'm your local stylist — I work entirely in your browser, with no cloud. I'll combine your **${itemCount}** items into outfits using color theory and formality matching. Try a prompt like "casual weekend look", "3 outfits for warm weather", or "something formal for an evening dinner". Each suggestion I make is saveable and clearly badged as AI-suggested.`;
 }
 
 export function unableMessage(reason) {
   switch (reason) {
-    case 'no-tops':
-      return `I can't build a complete outfit without at least one **top** in your library. Add a top and try again.`;
+    case 'no-main-piece':
+      return `I can't build a complete outfit without at least one **top or dress** in your library. Add one and try again.`;
     case 'no-shoes':
       return `I need at least one pair of **shoes** to anchor an outfit. Add some and ping me back.`;
     case 'no-items':

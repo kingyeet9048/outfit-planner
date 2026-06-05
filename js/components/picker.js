@@ -1,11 +1,10 @@
 import { el, sheet } from '../ui.js';
 import { urlFor, hasBytes } from '../image.js';
 import { items as itemsStore, outfits as outfitsStore } from '../store.js';
+import { renderStack } from './outfit-stack.js';
 import { buildOutfitReuseSummary, reuseSummaryShortText } from '../reuse.js';
 import { cleanSearchQuery, itemMatchesQuery, normalizeTags, outfitMatchesQuery } from '../search.js';
-
-const CATEGORY_LABELS = { top: 'Top', pant: 'Pant', shoes: 'Shoes', accessory: 'Accessory', other: 'Other' };
-const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨', other: '🎒' };
+import { categoryIcon, categoryLabel, normalizeCategoryList } from '../categories.js';
 
 function mapById(list) {
   return new Map((Array.isArray(list) ? list : []).map(entry => [entry.id, entry]));
@@ -29,12 +28,17 @@ function planOutfitIds(planByDate, date) {
 
 // Pick a single item filtered by category. Returns Promise<itemId|null|undefined>.
 // undefined = dismissed without choice; null = explicit "Clear slot"; string = chosen id
-export async function pickItem({ category, currentId = null, allowClear = true, ownerKey = 'picker' } = {}) {
-  const list = await itemsStore.byCategory(category);
+export async function pickItem({ category, currentId = null, allowClear = true, ownerKey = 'picker', onCreate = null } = {}) {
+  const categories = normalizeCategoryList(category);
+  const label = categories.length === 1
+    ? categoryLabel(categories[0])
+    : categories.map(cat => categoryLabel(cat, { plural: true })).join(' / ');
+  const categoryLists = await Promise.all(categories.map(cat => itemsStore.byCategory(cat)));
+  const list = categoryLists.flat();
   list.sort((a, b) => (a.owned === b.owned ? (a.name || '').localeCompare(b.name || '') : a.owned ? -1 : 1));
 
   return sheet({
-    title: `Choose ${CATEGORY_LABELS[category] || 'item'}`,
+    title: `Choose ${label || 'item'}`,
     body: (close) => {
       let q = '';
       let searchInput, clearSearchBtn;
@@ -93,10 +97,14 @@ export async function pickItem({ category, currentId = null, allowClear = true, 
         }
         if (!list.length) {
           children.push(el('div', { class: 'state', style: { gridColumn: '1/-1' } }, [
-            el('div', { class: 'state-icon' }, CATEGORY_ICONS[category] || '👕'),
-            el('h3', null, `No ${CATEGORY_LABELS[category]?.toLowerCase() || 'items'} yet`),
+            el('div', { class: 'state-icon' }, categoryIcon(categories[0])),
+            el('h3', null, `No ${label.toLowerCase() || 'items'} yet`),
             el('p', null, 'Add an item to use it in outfits.'),
-            el('a', { class: 'btn btn-primary', href: '#/item/new', onClick: () => close(undefined) }, 'Add item')
+            el('a', {
+              class: 'btn btn-primary',
+              href: '#/item/new',
+              onClick: () => { if (onCreate) onCreate(); close(undefined); }
+            }, 'Add item')
           ]));
         } else {
           const visible = list.filter(it => itemMatchesQuery(it, q));
@@ -126,7 +134,7 @@ export async function pickItem({ category, currentId = null, allowClear = true, 
                 onClick: () => close(it.id)
               }, [
                 el('div', { class: 'thumb-wrap' }, [
-                  hasBytes(it.imageBlob) ? el('img', { src: urlFor(ownerKey, it.imageBlob), alt: '', loading: 'lazy' }) : el('span', null, CATEGORY_ICONS[it.category]),
+                  hasBytes(it.imageBlob) ? el('img', { src: urlFor(ownerKey, it.imageBlob), alt: '', loading: 'lazy' }) : el('span', null, categoryIcon(it.category)),
                   el('span', { class: `ownership-badge ${it.owned ? 'owned' : 'tobuy'}`, title: it.owned ? 'Owned' : 'To buy' }, it.owned ? '✓' : '$')
                 ]),
                 el('div', { class: 'item-name' }, it.name || '(unnamed)'),
@@ -148,7 +156,7 @@ export async function pickItem({ category, currentId = null, allowClear = true, 
 }
 
 // Pick a single outfit. Returns Promise<outfitId|null|undefined>
-export async function pickOutfit({ currentId = null, allowClear = true, reuseContext = null } = {}) {
+export async function pickOutfit({ currentId = null, allowClear = true, reuseContext = null, onCreate = null } = {}) {
   const list = await outfitsStore.all();
   list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   const outfitsById = isMapLike(reuseContext?.outfitsById) ? reuseContext.outfitsById : mapById(list);
@@ -210,12 +218,30 @@ export async function pickOutfit({ currentId = null, allowClear = true, reuseCon
             onClick: () => close(null)
           }, '🗑️ Remove this outfit'));
         }
+        if (onCreate && list.length) {
+          children.push(el('a', {
+            class: 'list-row',
+            href: '#/outfit/new',
+            onClick: () => { onCreate(); close(undefined); }
+          }, [
+            el('div', { class: 'thumb' }, '+'),
+            el('div', { class: 'row-body' }, [
+              el('div', null, 'Create new outfit'),
+              el('div', { class: 'row-sub' }, 'Add it to this day after saving')
+            ]),
+            el('span', { class: 'row-chevron' }, '›')
+          ]));
+        }
         if (!list.length) {
           children.push(el('div', { class: 'state' }, [
             el('div', { class: 'state-icon' }, '👔'),
             el('h3', null, 'No outfits yet'),
             el('p', null, 'Create an outfit to plan your days.'),
-            el('a', { class: 'btn btn-primary', href: '#/outfit/new', onClick: () => close(undefined) }, 'Create outfit')
+            el('a', {
+              class: 'btn btn-primary',
+              href: '#/outfit/new',
+              onClick: () => { if (onCreate) onCreate(); close(undefined); }
+            }, 'Create outfit')
           ]));
         } else {
           const visible = list.filter(o => outfitMatchesQuery(o, itemsById, q));
@@ -254,7 +280,7 @@ export async function pickOutfit({ currentId = null, allowClear = true, reuseCon
                 disabled: alreadyOnTarget,
                 onClick: () => close(o.id)
               }, [
-                el('div', { class: 'thumb' }, '👔'),
+                renderStack({ outfit: o, itemsById, size: 'trip', ownerKey: 'outfit-picker', showOwnership: false, showEmptySlots: false }),
                 el('div', { class: 'row-body' }, [
                   el('div', { class: 'row-title' }, o.name || 'Untitled'),
                   el('div', { class: 'row-sub' }, outfitItemSummary(o, itemsById)),

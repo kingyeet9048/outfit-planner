@@ -3,17 +3,17 @@ import { items as itemsStore, outfits as outfitsStore } from '../store.js';
 import { renderStack, outfitRollup } from '../components/outfit-stack.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
 import { shareOutfits } from '../share.js';
-
-const CATEGORY_LABELS = { top: 'Top', pant: 'Pant', shoes: 'Shoes', accessory: 'Accessory', other: 'Other' };
-const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨', other: '🎒' };
+import { categoryIcon, categoryLabel } from '../categories.js';
 
 // Order items appear in the section list — top-down anatomical
 const SECTION_ORDER = [
-  { key: 'accessoryIds', label: 'Accessories', icon: '✨' },
+  { key: 'accessoryIds', label: 'Accessories', icon: '✨', category: 'accessory' },
+  { key: 'accessoryIds', label: 'Purses', icon: '👜', category: 'purse' },
+  { key: 'otherIds', label: 'Dresses', icon: '👗', category: 'dress' },
   { key: 'topId', label: 'Top', icon: '👕', single: true },
-  { key: 'pantId', label: 'Pant', icon: '👖', single: true },
+  { key: 'pantId', label: 'Bottom', icon: '👖', single: true },
   { key: 'shoesId', label: 'Shoes', icon: '👟', single: true },
-  { key: 'otherIds', label: 'Other', icon: '🎒' }
+  { key: 'otherIds', label: 'Other', icon: '🎒', category: 'other' }
 ];
 
 export async function view({ id }) {
@@ -78,15 +78,16 @@ export async function view({ id }) {
     ids.forEach(itemId => {
       const it = itemsById.get(itemId);
       if (!it) return;
+      if (section.category && it.category !== section.category) return;
       anySlotFilled = true;
       slotsBody.appendChild(el('a', { class: 'list-row', href: `#/item/${it.id}` }, [
         el('div', { class: 'thumb' }, hasBytes(it.imageBlob)
           ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: '' })
-          : el('span', null, CATEGORY_ICONS[it.category] || section.icon)),
+          : el('span', null, categoryIcon(it.category, section.icon))),
         el('div', { class: 'row-body' }, [
           el('div', { class: 'row-title' }, it.name || '(unnamed)'),
           el('div', { class: 'row-sub' }, [
-            CATEGORY_LABELS[it.category] || it.category,
+            categoryLabel(it.category),
             it.subcategory ? ` · ${it.subcategory}` : ''
           ].join(''))
         ]),

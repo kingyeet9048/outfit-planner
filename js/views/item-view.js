@@ -2,9 +2,7 @@ import { el, renderTopbar, iconButton, toast, confirm, sheet, backControl } from
 import { items as itemsStore, outfits as outfitsStore } from '../store.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
 import { normalizeTags } from '../search.js';
-
-const CATEGORY_LABELS = { top: 'Top', pant: 'Pant', shoes: 'Shoes', accessory: 'Accessory', other: 'Other' };
-const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨', other: '🎒' };
+import { categoryIcon, categoryLabel } from '../categories.js';
 
 export async function view({ id }) {
   const OWNER = 'item-view';
@@ -34,14 +32,14 @@ export async function view({ id }) {
   root.appendChild(el('div', { class: 'detail-hero' }, [
     hasBytes(item.imageBlob)
       ? el('img', { class: 'detail-hero-img', src: urlFor(OWNER, item.imageBlob), alt: item.name })
-      : el('div', { class: 'detail-hero-fallback', 'aria-hidden': 'true' }, CATEGORY_ICONS[item.category] || '👕')
+      : el('div', { class: 'detail-hero-fallback', 'aria-hidden': 'true' }, categoryIcon(item.category))
   ]));
 
   // Name + status pills
   root.appendChild(el('h2', { class: 'detail-title' }, item.name || '(unnamed)'));
   root.appendChild(el('div', { class: 'detail-pills' }, [
     el('span', { class: 'badge badge-accent' }, [
-      CATEGORY_LABELS[item.category] || item.category,
+      categoryLabel(item.category),
       item.subcategory ? ` · ${item.subcategory}` : ''
     ].join('')),
     el('span', { class: `badge ${item.owned ? 'badge-success' : 'badge-warn'}` }, item.owned ? '✓ Owned' : '$ To buy')

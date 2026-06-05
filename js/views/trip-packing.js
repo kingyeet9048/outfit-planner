@@ -10,17 +10,17 @@ import {
   setCustomPackingItemChecked,
   setPackingItemChecked
 } from '../packing.js';
+import { categoryIcon, categoryLabel } from '../categories.js';
 
 const OWNER = 'trip-packing';
 const nowIso = () => new Date().toISOString();
-const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨', other: '🎒' };
 
 function itemMeta(item) {
-  return [item.category, item.subcategory].filter(Boolean).join(' · ');
+  return [categoryLabel(item.category), item.subcategory].filter(Boolean).join(' · ');
 }
 
 function itemIcon(item) {
-  return CATEGORY_ICONS[item?.category] || '👕';
+  return categoryIcon(item?.category);
 }
 
 function usesText(uses = []) {

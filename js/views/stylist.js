@@ -227,8 +227,8 @@ async function respond(prompt, itemContext, session) {
     return packReply(refined, intent, prompt, `Here's a refined version:`);
   }
   // Validate
-  const hasTops = itemContext.some(i => i.category === 'top');
-  if (!hasTops) return { role: 'stylist', text: unableMessage('no-tops') };
+  const hasMainPiece = itemContext.some(i => i.category === 'top' || i.category === 'dress');
+  if (!hasMainPiece) return { role: 'stylist', text: unableMessage('no-main-piece') };
   const hasShoes = itemContext.some(i => i.category === 'shoes');
   if (!hasShoes) return { role: 'stylist', text: unableMessage('no-shoes') };
 

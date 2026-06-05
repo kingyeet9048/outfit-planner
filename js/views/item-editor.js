@@ -5,14 +5,8 @@ import { resizeFile, urlFor, releaseOwner, hasBytes } from '../image.js';
 import { normalizeTags } from '../search.js';
 import { trackActivation } from '../activation.js';
 import { queueFeedbackPrompt } from '../feedback.js';
-
-const CATEGORIES = [
-  { value: 'top', label: 'Top' },
-  { value: 'pant', label: 'Pant' },
-  { value: 'shoes', label: 'Shoes' },
-  { value: 'accessory', label: 'Accessory' },
-  { value: 'other', label: 'Other' }
-];
+import { ITEM_CATEGORIES, ITEM_CATEGORY_VALUES, categoryUsesSubcategory, subcategoryPlaceholder } from '../categories.js';
+import { completeItemCreateContinuation, peekItemCreateContinuation, returnToItemCreateContinuation } from '../continuations.js';
 
 export async function view({ id }) {
   const OWNER = 'item-editor';
@@ -20,6 +14,10 @@ export async function view({ id }) {
 
   const isNew = !id || id === 'new';
   const existing = isNew ? null : await itemsStore.get(id);
+  const pendingContinuation = isNew ? peekItemCreateContinuation() : null;
+  const params = new URLSearchParams(location.hash.split('?')[1] || '');
+  const requestedCategory = params.get('category') || pendingContinuation?.defaultCategory || 'top';
+  const defaultCategory = ITEM_CATEGORY_VALUES.has(requestedCategory) ? requestedCategory : 'top';
 
   if (!isNew && !existing) {
     renderTopbar({ title: 'Not found', left: backControl('#/items') });
@@ -28,7 +26,7 @@ export async function view({ id }) {
 
   const state = {
     name: existing?.name || '',
-    category: existing?.category || 'top',
+    category: existing?.category || defaultCategory,
     subcategory: existing?.subcategory || '',
     description: existing?.description || '',
     purchaseUrl: existing?.purchaseUrl || '',
@@ -57,6 +55,11 @@ export async function view({ id }) {
     if (state.dirty) {
       const ok = await confirm({ title: 'Discard changes?', message: 'You have unsaved changes.', confirmLabel: 'Discard', danger: true });
       if (!ok) return;
+    }
+    const returnHash = isNew ? returnToItemCreateContinuation() : null;
+    if (returnHash) {
+      back(returnHash);
+      return;
     }
     back(exitHash);
   }
@@ -113,27 +116,26 @@ export async function view({ id }) {
 
   // Category — segmented control
   const segmented = el('div', { class: 'segmented', role: 'tablist' });
-  const subcatVisible = (cat) => cat === 'accessory' || cat === 'other';
-  const subcatPlaceholder = (cat) => cat === 'other' ? 'e.g., jacket, bag, hat' : 'e.g., watch, necklace, ring';
   const subcatInput = el('input', {
-    type: 'text', value: state.subcategory, placeholder: subcatPlaceholder(state.category),
+    type: 'text', value: state.subcategory, placeholder: subcategoryPlaceholder(state.category),
     onInput: (e) => { state.subcategory = e.target.value; state.dirty = true; }
   });
-  const subcatField = el('div', { class: 'field', style: subcatVisible(state.category) ? null : { display: 'none' } }, [
+  const subcatField = el('div', { class: 'field', style: categoryUsesSubcategory(state.category) ? null : { display: 'none' } }, [
     el('label', null, 'Subcategory'),
     subcatInput
   ]);
-  CATEGORIES.forEach(c => {
+  ITEM_CATEGORIES.forEach(c => {
     segmented.appendChild(el('button', {
       type: 'button',
       role: 'tab',
+      dataset: { categoryValue: c.value },
       'aria-pressed': state.category === c.value ? 'true' : 'false',
       onClick: () => {
         state.category = c.value;
         state.dirty = true;
-        segmented.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.textContent === c.label ? 'true' : 'false'));
-        subcatField.style.display = subcatVisible(c.value) ? '' : 'none';
-        subcatInput.placeholder = subcatPlaceholder(c.value);
+        segmented.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.categoryValue === c.value ? 'true' : 'false'));
+        subcatField.style.display = categoryUsesSubcategory(c.value) ? '' : 'none';
+        subcatInput.placeholder = subcategoryPlaceholder(c.value);
       }
     }, c.label));
   });
@@ -236,6 +238,11 @@ export async function view({ id }) {
       });
       if (isNew) queueFeedbackPrompt('item_created', { category: state.category, owned: !!state.owned });
       state.dirty = false;
+      const continuation = isNew ? completeItemCreateContinuation(saved.id) : null;
+      if (continuation?.returnHash) {
+        back(continuation.returnHash);
+        return;
+      }
       // Land on the read-only view after save — user can re-tap Edit to keep editing.
       location.hash = `#/item/${saved.id}`;
     } catch (err) {

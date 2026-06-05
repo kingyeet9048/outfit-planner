@@ -1,6 +1,5 @@
 import { uuid } from './db.js';
-
-const CATEGORY_ORDER = ['accessory', 'top', 'pant', 'shoes', 'other'];
+import { CATEGORY_ORDER } from './categories.js';
 
 function itemIds(outfit) {
   if (!outfit) return [];
