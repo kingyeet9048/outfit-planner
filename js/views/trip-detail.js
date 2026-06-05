@@ -7,8 +7,7 @@ import { buildOutfitReuseSummary, formatDateShort, mergeOutfitIds, reuseSummaryC
 import { deriveTripPacking } from '../packing.js';
 import { trackActivation, trackActivationOnce } from '../activation.js';
 import { queueFeedbackPrompt, showQueuedFeedbackPrompt } from '../feedback.js';
-
-const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨', other: '🎒' };
+import { categoryIcon, categoryLabel } from '../categories.js';
 
 // Deterministic, recognizable color for a store avatar (same store → same hue
 // across renders). Mid-tone lightness so white text stays legible in both themes.
@@ -21,7 +20,7 @@ function storeColor(seed) {
 }
 
 function itemIcon(item) {
-  return CATEGORY_ICONS[item?.category] || '👕';
+  return categoryIcon(item?.category);
 }
 
 export async function view({ id }) {
@@ -149,7 +148,7 @@ export async function view({ id }) {
       el('div', { class: 'si-body' }, [
         el('div', { class: 'si-name' }, it.name || '(unnamed)'),
         el('div', { class: 'si-cat' }, [
-          it.category,
+          categoryLabel(it.category),
           it.subcategory ? ` · ${it.subcategory}` : ''
         ].join(''))
       ]),
@@ -210,7 +209,7 @@ export async function view({ id }) {
             class: 'day-row',
             onClick: () => openOutfitDayActions(dateIso, idx, oid, data)
           }, [
-            renderStack({ outfit, itemsById: data.itemsById, size: 'sm', ownerKey: OWNER }),
+            renderStack({ outfit, itemsById: data.itemsById, size: 'trip', ownerKey: OWNER, showOwnership: false, showEmptySlots: false }),
             el('div', { class: 'day-body' }, [
               el('div', { class: 'day-title' }, outfit.name || 'Untitled'),
               el('div', { class: 'day-sub' }, `${rollup.total} item${rollup.total === 1 ? '' : 's'} · ${rollup.owned} owned${rollup.toBuy ? ` · ${rollup.toBuy} to buy` : ''}`),

@@ -5,7 +5,7 @@ import { match, register } from '../js/router.js';
 import { el, backControl } from '../js/ui.js';
 import { renderNav } from '../js/components/nav.js';
 import {
-  TAG_LIMITS, availableTags, filterItems, itemMatchesQuery, normalizeTags, outfitMatchesQuery
+  TAG_LIMITS, availableTags, filterItems, itemMatchesQuery, normalizeItemFilter, normalizeTags, outfitMatchesQuery
 } from '../js/search.js';
 import { parseIntent } from '../js/stylist/intent.js';
 import { buildItemContext, generateOutfits } from '../js/stylist/engine.js';
@@ -15,6 +15,7 @@ import * as db from '../js/db.js';
 import { items, outfits, trips, dayPlans, daysBetween, formatDayLabel, formatDateRange, tripShoppingList, tripStats, retailerFromUrl, groupShoppingByRetailer } from '../js/store.js';
 import { buildOutfitReuseSummary, mergeOutfitIds, nextCopyName, reuseSummaryCopy, reuseSummaryShortText } from '../js/reuse.js';
 import { pickItem, pickOutfit } from '../js/components/picker.js';
+import { renderStack } from '../js/components/outfit-stack.js';
 import {
   addCustomPackingItem,
   deriveTripPacking,
@@ -434,6 +435,22 @@ test('search.filterItems: combines category, ownership, q, and tag filters', () 
   assertEq(itemMatchesQuery(wardrobe[0], 'capsule shirt'), true);
 });
 
+test('search.filterItems: supports dress, skirt, and purse item categories', () => {
+  const wardrobe = [
+    { id: 'dress1', name: 'Black Travel Dress', category: 'dress', owned: 1 },
+    { id: 'skirt1', name: 'Pleated Midi', category: 'skirt', owned: 1 },
+    { id: 'purse1', name: 'Crossbody Bag', category: 'purse', owned: 0 }
+  ];
+  assertEq(normalizeItemFilter('dress'), 'dress');
+  assertEq(normalizeItemFilter('skirt'), 'skirt');
+  assertEq(normalizeItemFilter('purse'), 'purse');
+  assertEq(filterItems(wardrobe, { filter: 'dress' }).map(i => i.id), ['dress1']);
+  assertEq(filterItems(wardrobe, { filter: 'skirt' }).map(i => i.id), ['skirt1']);
+  assertEq(filterItems(wardrobe, { filter: 'purse' }).map(i => i.id), ['purse1']);
+  assertEq(filterItems(wardrobe, { filter: 'tobuy' }).map(i => i.id), ['purse1']);
+  assertEq(itemMatchesQuery(wardrobe[2], 'purse crossbody'), true);
+});
+
 test('search.outfitMatchesQuery: matches outfit text and contained item names/tags', () => {
   const top = { id: 'top1', name: 'Silk Cami', tags: ['Dinner'] };
   const shoes = { id: 'shoe1', name: 'Black Heel', tags: ['Formal'] };
@@ -577,6 +594,21 @@ test('stylist.engine: generates a full outfit from seed items', async () => {
   assertTrue(o.topId, 'has top');
   assertTrue(o.shoesId, 'has shoes');
   assertTrue(o._meta, 'metadata attached');
+});
+
+test('stylist.engine: uses a dress as a main outfit piece', async () => {
+  await withTestDb();
+  const dress = await items.put({ name: 'Black Travel Dress', category: 'dress', owned: true });
+  const shoes = await items.put({ name: 'Walking Flats', category: 'shoes', owned: true });
+  const purse = await items.put({ name: 'Crossbody Purse', category: 'purse', owned: true });
+  const ctx = await buildItemContext(await items.all());
+  const generated = generateOutfits(ctx, parseIntent('formal dress outfit'), { seed: 7 });
+  assertEq(generated.length, 1);
+  assertEq(generated[0].topId, null);
+  assertEq(generated[0].pantId, null);
+  assertEq(generated[0].otherIds, [dress.id]);
+  assertEq(generated[0].shoesId, shoes.id);
+  assertTrue((generated[0].accessoryIds || []).includes(purse.id), 'purse can be used like an accessory');
 });
 
 test('stylist.engine: respects count from intent', async () => {
@@ -1183,6 +1215,22 @@ test('share.renderOutfitsCanvas: item with no imageBlob renders category-icon pl
   const outfit = { id: 'o1', name: 'P', topId: 't1', pantId: null, shoesId: null, accessoryIds: [], otherIds: [] };
   const canvas = await renderOutfitsCanvas([outfit], new Map([[top.id, top]]));
   assertTrue(canvas.height > 300);
+});
+
+test('outfit-stack: trip preview shows only actual items without ownership badges', () => {
+  const dress = { id: 'd1', name: 'Travel Dress', category: 'dress', owned: 0, imageBlob: null };
+  const outfit = { id: 'o1', name: 'Dress only', topId: null, pantId: null, shoesId: null, accessoryIds: [], otherIds: [dress.id] };
+  const node = renderStack({
+    outfit,
+    itemsById: new Map([[dress.id, dress]]),
+    size: 'trip',
+    showOwnership: false,
+    showEmptySlots: false
+  });
+  assertTrue(node.classList.contains('is-single-item'), 'single dress preview can grow larger');
+  assertTrue((node.textContent || '').includes('👗'), 'dress icon is visible');
+  assertTrue(!(node.textContent || '').includes('👟'), 'empty shoe placeholder is omitted');
+  assertEq(node.querySelector('.ownership-badge'), null);
 });
 
 test('share.renderOutfitsCanvas: never upscales — preserves source resolution for "minimal quality loss"', async () => {
@@ -1850,6 +1898,32 @@ test('UI: list search clear buttons hide until a query is active and keep URL st
   outfitResult.cleanup?.();
 });
 
+test('UI: item editor exposes dress, skirt, and purse categories', async () => {
+  ensureUiRoots();
+  await withTestDb();
+  const { view: itemEditorView } = await import('../js/views/item-editor.js');
+  const result = await itemEditorView({ id: 'new' });
+  try {
+    const buttons = [...result.node.querySelectorAll('.segmented button')];
+    const labels = buttons.map(btn => btn.textContent.trim());
+    assertTrue(labels.includes('Dress'), 'Dress category button is visible');
+    assertTrue(labels.includes('Skirt'), 'Skirt category button is visible');
+    assertTrue(labels.includes('Purse'), 'Purse category button is visible');
+
+    const purseBtn = buttons.find(btn => btn.textContent.trim() === 'Purse');
+    purseBtn.click();
+    assertEq(purseBtn.getAttribute('aria-pressed'), 'true');
+    assertTrue(!!result.node.querySelector('input[placeholder*="crossbody"]'), 'purse subcategory hint is shown');
+
+    const dressBtn = buttons.find(btn => btn.textContent.trim() === 'Dress');
+    dressBtn.click();
+    assertEq(dressBtn.getAttribute('aria-pressed'), 'true');
+    assertTrue(!!result.node.querySelector('input[placeholder*="maxi"]'), 'dress subcategory hint is shown');
+  } finally {
+    result.cleanup?.();
+  }
+});
+
 test('UI: item picker search filters by item name and tags inside the sheet', async () => {
   ensureUiRoots();
   closeAllSheets();
@@ -1874,6 +1948,25 @@ test('UI: item picker search filters by item name and tags inside the sheet', as
   clear.click();
   assertEq([...dlg.querySelectorAll('.item-card .item-name')].map(n => n.textContent), ['Dinner Blouse', 'Travel Tee']);
   assertTrue(clear.hidden, 'picker clear button hides after clearing');
+  dlg.querySelector('.sheet-header .icon-btn').click();
+  assertEq(await pickerPromise, undefined);
+});
+
+test('UI: item picker can combine pants and skirts for the bottom slot', async () => {
+  ensureUiRoots();
+  closeAllSheets();
+  await withTestDb();
+  await items.put({ name: 'Travel Pants', category: 'pant', owned: true });
+  await items.put({ name: 'Pleated Skirt', category: 'skirt', owned: true });
+  await items.put({ name: 'Linen Top', category: 'top', owned: true });
+
+  const pickerPromise = pickItem({ category: ['pant', 'skirt'], allowClear: false, ownerKey: 'test-bottom-picker' });
+  await wait(40);
+  const dlg = currentSheet();
+  assertTrue(dlg, 'picker sheet opened');
+  assertTrue(/Choose Pants \/ Skirts/.test(dlg.textContent || ''), 'grouped bottom picker title is clear');
+  const names = [...dlg.querySelectorAll('.item-card .item-name')].map(n => n.textContent).sort();
+  assertEq(names, ['Pleated Skirt', 'Travel Pants']);
   dlg.querySelector('.sheet-header .icon-btn').click();
   assertEq(await pickerPromise, undefined);
 });
@@ -1905,6 +1998,26 @@ test('UI: outfit picker search matches notes and contained item tags', async () 
   clear.click();
   assertEq([...dlg.querySelectorAll('.row-title')].map(n => n.textContent), ['Airport Look', 'Evening Look']);
   assertTrue(clear.hidden, 'picker clear button hides after clearing');
+  dlg.querySelector('.sheet-header .icon-btn').click();
+  assertEq(await pickerPromise, undefined);
+});
+
+test('UI: outfit picker shows actual dress outfit preview without owned/to-buy badges', async () => {
+  ensureUiRoots();
+  closeAllSheets();
+  await withTestDb();
+  const dress = await items.put({ name: 'Travel Dress', category: 'dress', owned: false });
+  await outfits.put({ name: 'Dress Day', otherIds: [dress.id] });
+
+  const pickerPromise = pickOutfit({ allowClear: false });
+  await wait(40);
+  const dlg = currentSheet();
+  assertTrue(dlg, 'picker sheet opened');
+  const stack = dlg.querySelector('.outfit-stack.trip.is-single-item');
+  assertTrue(stack, 'dress-only outfit gets a large actual-item preview');
+  assertTrue((stack.textContent || '').includes('👗'), 'dress icon is visible in picker preview');
+  assertTrue(!(stack.textContent || '').includes('👟'), 'generic empty slot icon is omitted');
+  assertEq(stack.querySelector('.ownership-badge'), null);
   dlg.querySelector('.sheet-header .icon-btn').click();
   assertEq(await pickerPromise, undefined);
 });
@@ -1983,6 +2096,27 @@ test('UI: outfit detail menu offers duplicate without replacing native Back cont
   } finally {
     result.cleanup?.();
     closeAllSheets();
+  }
+});
+
+test('UI: trip detail day rows show actual dress preview without owned/to-buy badges', async () => {
+  ensureUiRoots();
+  await withTestDb();
+  const dress = await items.put({ name: 'Travel Dress', category: 'dress', owned: false });
+  const outfit = await outfits.put({ name: 'Dress Day', otherIds: [dress.id] });
+  const trip = await trips.put({ name: 'Weekend', startDate: '2026-07-01', endDate: '2026-07-01' });
+  await dayPlans.setOutfits(trip.id, '2026-07-01', [outfit.id]);
+
+  const { view: tripDetailView } = await import('../js/views/trip-detail.js');
+  const result = await tripDetailView({ id: trip.id });
+  try {
+    const stack = result.node.querySelector('.day-row .outfit-stack.trip.is-single-item');
+    assertTrue(stack, 'planned dress outfit gets a large actual-item preview');
+    assertTrue((stack.textContent || '').includes('👗'), 'dress icon is visible in trip row');
+    assertTrue(!(stack.textContent || '').includes('👟'), 'generic empty slot icon is omitted from trip row');
+    assertEq(stack.querySelector('.ownership-badge'), null);
+  } finally {
+    result.cleanup?.();
   }
 });
 

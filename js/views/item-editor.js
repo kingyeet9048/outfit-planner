@@ -5,14 +5,7 @@ import { resizeFile, urlFor, releaseOwner, hasBytes } from '../image.js';
 import { normalizeTags } from '../search.js';
 import { trackActivation } from '../activation.js';
 import { queueFeedbackPrompt } from '../feedback.js';
-
-const CATEGORIES = [
-  { value: 'top', label: 'Top' },
-  { value: 'pant', label: 'Pant' },
-  { value: 'shoes', label: 'Shoes' },
-  { value: 'accessory', label: 'Accessory' },
-  { value: 'other', label: 'Other' }
-];
+import { ITEM_CATEGORIES, categoryUsesSubcategory, subcategoryPlaceholder } from '../categories.js';
 
 export async function view({ id }) {
   const OWNER = 'item-editor';
@@ -113,27 +106,26 @@ export async function view({ id }) {
 
   // Category — segmented control
   const segmented = el('div', { class: 'segmented', role: 'tablist' });
-  const subcatVisible = (cat) => cat === 'accessory' || cat === 'other';
-  const subcatPlaceholder = (cat) => cat === 'other' ? 'e.g., jacket, bag, hat' : 'e.g., watch, necklace, ring';
   const subcatInput = el('input', {
-    type: 'text', value: state.subcategory, placeholder: subcatPlaceholder(state.category),
+    type: 'text', value: state.subcategory, placeholder: subcategoryPlaceholder(state.category),
     onInput: (e) => { state.subcategory = e.target.value; state.dirty = true; }
   });
-  const subcatField = el('div', { class: 'field', style: subcatVisible(state.category) ? null : { display: 'none' } }, [
+  const subcatField = el('div', { class: 'field', style: categoryUsesSubcategory(state.category) ? null : { display: 'none' } }, [
     el('label', null, 'Subcategory'),
     subcatInput
   ]);
-  CATEGORIES.forEach(c => {
+  ITEM_CATEGORIES.forEach(c => {
     segmented.appendChild(el('button', {
       type: 'button',
       role: 'tab',
+      dataset: { categoryValue: c.value },
       'aria-pressed': state.category === c.value ? 'true' : 'false',
       onClick: () => {
         state.category = c.value;
         state.dirty = true;
-        segmented.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.textContent === c.label ? 'true' : 'false'));
-        subcatField.style.display = subcatVisible(c.value) ? '' : 'none';
-        subcatInput.placeholder = subcatPlaceholder(c.value);
+        segmented.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.categoryValue === c.value ? 'true' : 'false'));
+        subcatField.style.display = categoryUsesSubcategory(c.value) ? '' : 'none';
+        subcatInput.placeholder = subcategoryPlaceholder(c.value);
       }
     }, c.label));
   });

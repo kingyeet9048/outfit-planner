@@ -1,4 +1,6 @@
-const STRONG_SLOTS = new Set(['top', 'pant']);
+import { categoryLabel } from './categories.js';
+
+const STRONG_SLOTS = new Set(['top', 'pant', 'skirt', 'dress']);
 
 const SLOT_DEFS = [
   { key: 'topId', slot: 'top', label: 'top', plural: 'tops', single: true },
@@ -39,7 +41,7 @@ export function nextCopyName(baseName, existingNames = []) {
   return `${base} copy ${n}`;
 }
 
-export function outfitItemEntries(outfit) {
+export function outfitItemEntries(outfit, itemsById = null) {
   if (!outfit) return [];
   const entries = [];
   for (const def of SLOT_DEFS) {
@@ -48,12 +50,15 @@ export function outfitItemEntries(outfit) {
       : (Array.isArray(outfit[def.key]) ? outfit[def.key] : []);
     ids.forEach((itemId, index) => {
       if (!itemId) return;
+      const item = getItem(itemsById, itemId);
+      const category = item?.category || def.slot;
+      const label = category === def.slot ? def.label : categoryLabel(category).toLowerCase();
       entries.push({
         itemId,
-        slot: def.slot,
-        label: def.label,
-        plural: def.plural,
-        severity: STRONG_SLOTS.has(def.slot) ? 'strong' : 'soft',
+        slot: category === def.slot ? def.slot : category,
+        label,
+        plural: category === def.slot ? def.plural : categoryLabel(category, { plural: true }).toLowerCase(),
+        severity: STRONG_SLOTS.has(category === def.slot ? def.slot : category) ? 'strong' : 'soft',
         index
       });
     });
@@ -172,7 +177,7 @@ function preciseMatchText(matches, { includeOutfits = false, limit = 2 } = {}) {
 }
 
 export function buildOutfitReuseSummary({ outfit, date, planByDate, outfitsById, itemsById } = {}) {
-  const candidateEntries = outfitItemEntries(outfit);
+  const candidateEntries = outfitItemEntries(outfit, itemsById);
   if (!outfit) {
     return {
       hasReuse: false,
@@ -205,7 +210,7 @@ export function buildOutfitReuseSummary({ outfit, date, planByDate, outfitsById,
     for (const plannedOutfitId of outfitIds) {
       const plannedOutfit = getOutfit(outfitsById, plannedOutfitId);
       if (!plannedOutfit) continue;
-      for (const plannedEntry of outfitItemEntries(plannedOutfit)) {
+      for (const plannedEntry of outfitItemEntries(plannedOutfit, itemsById)) {
         const candidateMatches = entriesByItem.get(plannedEntry.itemId);
         if (!candidateMatches) continue;
         for (const candidateEntry of candidateMatches) {

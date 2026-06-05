@@ -529,6 +529,7 @@ body {
 /* Segmented control */
 .segmented {
   display: inline-flex;
+  flex-wrap: wrap;
   background: var(--surface-2);
   border: 1px solid var(--hairline);
   border-radius: var(--radius-md);
@@ -537,10 +538,11 @@ body {
   width: 100%;
 }
 .segmented button {
-  flex: 1; min-height: 40px; padding: 0 12px;
+  flex: 1 1 calc(25% - 2px); min-height: 40px; padding: 0 10px;
   border-radius: 8px;
   font-weight: 760; font-size: 14px;
   color: var(--text-muted);
+  white-space: nowrap;
   transition: background .15s, color .15s, box-shadow .15s;
 }
 .segmented button[aria-pressed="true"] { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-xs); }
@@ -739,6 +741,18 @@ body {
 .outfit-stack.lg .stack-accessories .stack-mini { width: 48px; height: 48px; border-radius: 8px; overflow: hidden; background: var(--surface-2); position: relative; }
 .outfit-stack.lg .stack-accessories .stack-mini img { width: 100%; height: 100%; object-fit: cover; }
 .outfit-stack.lg .stack-slot { height: 110px; font-size: 32px; }
+
+/* trip planner rows and outfit picker previews */
+.outfit-stack.trip { width: 112px; flex: 0 0 112px; }
+.outfit-stack.trip .stack-accessories { gap: 5px; }
+.outfit-stack.trip .stack-accessories .stack-mini { width: 26px; height: 26px; border-radius: 6px; overflow: hidden; background: var(--surface-2); position: relative; }
+.outfit-stack.trip .stack-accessories .stack-mini img { width: 100%; height: 100%; object-fit: cover; }
+.outfit-stack.trip .stack-slot { width: 112px; height: 52px; font-size: 22px; }
+.outfit-stack.trip.is-single-item .stack-accessories .stack-mini,
+.outfit-stack.trip.is-single-item .stack-slot {
+  width: 112px;
+  height: 112px;
+}
 
 /* ---------- Day row in trip detail ---------- */
 .day-section { margin-bottom: 16px; }

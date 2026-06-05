@@ -1,10 +1,10 @@
+import { ITEM_FILTER_VALUES } from './categories.js';
+
 export const TAG_LIMITS = {
   maxTags: 20,
   maxLength: 32,
   maxQueryLength: 80
 };
-
-const CATEGORY_VALUES = new Set(['all', 'top', 'pant', 'shoes', 'accessory', 'other', 'tobuy']);
 
 function normalizeText(value) {
   const text = String(value || '');
@@ -81,7 +81,7 @@ export function itemMatchesQuery(item, query) {
 }
 
 export function normalizeItemFilter(value) {
-  return CATEGORY_VALUES.has(value) ? value : 'all';
+  return ITEM_FILTER_VALUES.has(value) ? value : 'all';
 }
 
 export function filterItems(items = [], { filter = 'all', q = '', tag = '' } = {}) {

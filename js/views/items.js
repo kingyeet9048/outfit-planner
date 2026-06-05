@@ -2,18 +2,7 @@ import { el, renderTopbar, iconLink } from '../ui.js';
 import { items as itemsStore } from '../store.js';
 import { urlFor, releaseOwner, hasBytes } from '../image.js';
 import { availableTags, cleanSearchQuery, filterItems, normalizeItemFilter, normalizeTags } from '../search.js';
-
-const CATEGORIES = [
-  { value: 'all', label: 'All' },
-  { value: 'top', label: 'Tops' },
-  { value: 'pant', label: 'Pants' },
-  { value: 'shoes', label: 'Shoes' },
-  { value: 'accessory', label: 'Accessories' },
-  { value: 'other', label: 'Other' },
-  { value: 'tobuy', label: 'To buy' }
-];
-
-const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨', other: '🎒' };
+import { ITEM_CATEGORY_FILTERS, categoryIcon } from '../categories.js';
 
 export async function view() {
   const OWNER = 'items-list';
@@ -80,7 +69,7 @@ export async function view() {
 
   const filterButtons = new Map();
   const chipRow = el('div', { class: 'chip-row', role: 'group', 'aria-label': 'Item categories' });
-  CATEGORIES.forEach(c => {
+  ITEM_CATEGORY_FILTERS.forEach(c => {
     const btn = el('button', {
       type: 'button',
       class: 'chip',
@@ -147,7 +136,7 @@ export async function view() {
       href: `#/item/${it.id}`
     }, [
       el('div', { class: 'thumb-wrap' }, [
-        hasBytes(it.imageBlob) ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: it.name || '', loading: 'lazy' }) : el('span', null, CATEGORY_ICONS[it.category] || '👕'),
+        hasBytes(it.imageBlob) ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: it.name || '', loading: 'lazy' }) : el('span', null, categoryIcon(it.category)),
         el('span', {
           class: `ownership-badge ${it.owned ? 'owned' : 'tobuy'}`,
           'aria-label': it.owned ? 'Owned' : 'To buy',

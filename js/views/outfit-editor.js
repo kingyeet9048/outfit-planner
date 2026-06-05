@@ -5,8 +5,7 @@ import { urlFor, releaseOwner, hasBytes } from '../image.js';
 import { pickItem } from '../components/picker.js';
 import { trackActivation } from '../activation.js';
 import { queueFeedbackPrompt } from '../feedback.js';
-
-const CATEGORY_ICONS = { top: '👕', pant: '👖', shoes: '👟', accessory: '✨' };
+import { categoryIcon } from '../categories.js';
 
 export async function view({ id }) {
   const OWNER = 'outfit-editor';
@@ -56,11 +55,14 @@ export async function view({ id }) {
     el('input', { type: 'text', value: state.name, placeholder: 'e.g., Linen Casual', onInput: (e) => { state.name = e.target.value; state.dirty = true; } })
   ]));
 
-  // --- Slot sections in anatomical top-down order: Accessories → Top → Pant → Shoes → Other (catch-all at the bottom) ---
+  // --- Slot sections in anatomical top-down order. New categories reuse the
+  // existing outfit arrays so old exports/imports remain compatible.
   root.appendChild(renderMultiSection('accessoryIds', 'accessory', 'Accessories', '✨'));
-  root.appendChild(renderSingleSlot('top', 'Top'));
-  root.appendChild(renderSingleSlot('pant', 'Pant'));
-  root.appendChild(renderSingleSlot('shoes', 'Shoes'));
+  root.appendChild(renderMultiSection('accessoryIds', 'purse', 'Purses', '👜'));
+  root.appendChild(renderMultiSection('otherIds', 'dress', 'Dresses', '👗'));
+  root.appendChild(renderSingleSlot({ stateKey: 'topId', categories: ['top'], label: 'Top' }));
+  root.appendChild(renderSingleSlot({ stateKey: 'pantId', categories: ['pant', 'skirt'], label: 'Bottom' }));
+  root.appendChild(renderSingleSlot({ stateKey: 'shoesId', categories: ['shoes'], label: 'Shoes' }));
   root.appendChild(renderMultiSection('otherIds', 'other', 'Other', '🎒'));
 
   // Notes
@@ -86,7 +88,7 @@ export async function view({ id }) {
     }, 'Delete outfit'));
   }
 
-  function renderSingleSlot(cat, label) {
+  function renderSingleSlot({ stateKey, categories, label }) {
     const section = el('div', { class: 'slot-section' });
     section.appendChild(el('div', { class: 'slot-header' }, [el('h3', null, label)]));
     const tileWrap = el('div');
@@ -94,8 +96,7 @@ export async function view({ id }) {
     redraw();
 
     async function redraw() {
-      const slotKey = `${cat}Id`;
-      const curId = state[slotKey];
+      const curId = state[stateKey];
       const cur = curId ? itemById(curId) : null;
 
       if (!cur) {
@@ -109,7 +110,7 @@ export async function view({ id }) {
       } else {
         tileWrap.replaceChildren(el('div', { class: 'slot-tile' }, [
           el('div', { class: 'slot-thumb', onClick: openPicker }, [
-            hasBytes(cur.imageBlob) ? el('img', { src: urlFor(OWNER, cur.imageBlob), alt: '' }) : el('span', null, CATEGORY_ICONS[cat]),
+            hasBytes(cur.imageBlob) ? el('img', { src: urlFor(OWNER, cur.imageBlob), alt: '' }) : el('span', null, categoryIcon(cur.category)),
             el('span', { class: `ownership-badge sm ${cur.owned ? 'owned' : 'tobuy'}`, title: cur.owned ? 'Owned' : 'To buy' }, cur.owned ? '✓' : '$')
           ]),
           el('div', { class: 'slot-text', onClick: openPicker }, [
@@ -120,21 +121,21 @@ export async function view({ id }) {
             type: 'button',
             class: 'slot-remove',
             'aria-label': 'Remove',
-            onClick: () => { state[slotKey] = null; state.dirty = true; redraw(); }
+            onClick: () => { state[stateKey] = null; state.dirty = true; redraw(); }
           }, '×')
         ]));
       }
     }
 
     async function openPicker() {
-      const result = await pickItem({ category: cat, currentId: state[`${cat}Id`], ownerKey: OWNER });
+      const result = await pickItem({ category: categories, currentId: state[stateKey], ownerKey: OWNER });
       if (result === undefined) {
         // dismissed without choice; if user navigated to /item/new, refresh on return
         await refreshItemsCache();
         redraw();
         return;
       }
-      state[`${cat}Id`] = result;
+      state[stateKey] = result;
       state.dirty = true;
       await refreshItemsCache();
       redraw();
@@ -143,7 +144,7 @@ export async function view({ id }) {
     return section;
   }
 
-  // Multi-item slot for categories like 'accessory' and 'other' — N items, picker-driven.
+  // Multi-item slot for array-backed categories like accessory, purse, dress, and other.
   function renderMultiSection(stateKey, category, label, fallbackIcon) {
     const section = el('div', { class: 'slot-section' });
     section.appendChild(el('div', { class: 'slot-header' }, [el('h3', null, label)]));
@@ -154,10 +155,12 @@ export async function view({ id }) {
     async function redraw() {
       const ids = state[stateKey];
       const children = [];
-      ids.forEach((aid, idx) => {
+      ids.forEach((aid, sourceIdx) => {
         const it = itemById(aid);
+        const fallbackCategory = stateKey === 'accessoryIds' ? 'accessory' : 'other';
+        if (it ? it.category !== category : category !== fallbackCategory) return;
         const tile = el('div', { class: 'acc-tile' }, [
-          el('div', { class: 'slot-thumb', onClick: () => openPickerForReplace(idx) }, [
+          el('div', { class: 'slot-thumb', onClick: () => openPickerForReplace(sourceIdx) }, [
             it && hasBytes(it.imageBlob) ? el('img', { src: urlFor(OWNER, it.imageBlob), alt: '' }) : el('span', null, fallbackIcon),
             it ? el('span', { class: `ownership-badge sm ${it.owned ? 'owned' : 'tobuy'}` }, it.owned ? '✓' : '$') : null,
             el('button', {
@@ -165,7 +168,7 @@ export async function view({ id }) {
               class: 'slot-remove',
               'aria-label': 'Remove',
               style: { position: 'absolute', top: '-6px', right: '-6px', width: '22px', height: '22px', fontSize: '14px' },
-              onClick: (e) => { e.stopPropagation(); state[stateKey].splice(idx, 1); state.dirty = true; redraw(); }
+              onClick: (e) => { e.stopPropagation(); state[stateKey].splice(sourceIdx, 1); state.dirty = true; redraw(); }
             }, '×')
           ]),
           el('div', { class: 'acc-name' }, it ? (it.subcategory || it.name) : 'Removed')
