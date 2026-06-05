@@ -2266,6 +2266,47 @@ test('UI: trip detail day rows show actual dress preview without owned/to-buy ba
   }
 });
 
+test('UI: trip detail photo previews stay compact in day rows', async () => {
+  ensureUiRoots();
+  closeAllSheets();
+  const root = ensureViewRoot();
+  await withTestDb();
+  const photo = await makeTinyImageBlob('gold', 320);
+  const ring = await items.put({ name: 'Gold ring set', category: 'accessory', owned: true, imageBlob: photo });
+  const top = await items.put({ name: 'White knit polo', category: 'top', owned: true, imageBlob: photo });
+  const pant = await items.put({ name: 'Blue jeans', category: 'pant', owned: true, imageBlob: photo });
+  const shoes = await items.put({ name: 'Loafers', category: 'shoes', owned: true, imageBlob: photo });
+  const outfit = await outfits.put({
+    name: 'Super casual jean fit',
+    topId: top.id,
+    pantId: pant.id,
+    shoesId: shoes.id,
+    accessoryIds: [ring.id]
+  });
+  const trip = await trips.put({ name: 'Weekend', startDate: '2026-07-01', endDate: '2026-07-01' });
+  await dayPlans.setOutfits(trip.id, '2026-07-01', [outfit.id]);
+
+  const { view: tripDetailView } = await import('../js/views/trip-detail.js');
+  const result = await tripDetailView({ id: trip.id });
+  try {
+    root.replaceChildren(result.node);
+    await wait(120);
+    const row = root.querySelector('.day-row');
+    const stack = row && row.querySelector('.outfit-stack.trip');
+    assertTrue(stack, 'trip row has a preview stack');
+    const stackRect = stack.getBoundingClientRect();
+    assertTrue(stackRect.width <= 96, `trip preview should stay narrow, got ${stackRect.width}`);
+    const oversized = [...stack.querySelectorAll('img')]
+      .map(img => img.getBoundingClientRect())
+      .filter(rect => rect.width > 90 || rect.height > 90);
+    assertEq(oversized.length, 0, 'trip preview photos stay capped');
+    const bodyRect = row.querySelector('.day-body').getBoundingClientRect();
+    assertTrue(bodyRect.width > 180, `day text keeps readable width, got ${bodyRect.width}`);
+  } finally {
+    result.cleanup?.();
+  }
+});
+
 test('UI: trip packing view renders pack/to-buy sections and persists checklist changes', async () => {
   ensureUiRoots();
   await withTestDb();
